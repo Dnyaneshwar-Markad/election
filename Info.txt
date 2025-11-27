@@ -1,0 +1,16 @@
+C:\Users\Click01\Desktop\Election_Stremlit>stremlit run sa.py
+
+
+Command to run Project
+
+stremlit run sa.py
+
+
+Login page :
+User Id : admin1
+Password : admin1234
+
+
+
+
+

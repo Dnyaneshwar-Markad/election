@@ -12,19 +12,12 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib import colors
 from dashboard import dashboard_page
 from survey import survey_page
+from router import get_connection
 import os
 # ------------------- APP CONFIG -------------------
 st.set_page_config(page_title="Election Management Software", page_icon="favicon.png", layout="wide")
 
 # ------------------- DB CONNECTION -------------------
-def get_connection():
-    return pyodbc.connect(
-        "DRIVER={ODBC Driver 17 for SQL Server};"
-        "SERVER=DNYANESHWAR\MSSQLSERVER02;"
-        "DATABASE=Maharashtra;"
-        "UID=sa;"
-        "PWD=sa@123;"
-    )
 
 # ------------------- FETCH VOTERS -------------------
 def fetch_voters():
@@ -62,7 +55,7 @@ def add_bg_from_local(image_file):
         f"""
         <style>
         .stApp {{
-            background-image: url("data:image/png;base64,{encoded}");
+            background-image: linear-gradient(rgba(255,255,255,0.50), rgba(255,255,255,0.80)),url("data:image/png;base64,{encoded}");
             background-size: cover;
             background-position: center;
             background-attachment: fixed;
@@ -73,7 +66,7 @@ def add_bg_from_local(image_file):
     )
 
 # Call the function with your image
-add_bg_from_local("Election.png")
+# add_bg_from_local("Election.png")
 
 
 # ------------------- FOOTER -------------------
@@ -107,19 +100,20 @@ st.markdown("""
 <style>
 /* Remove global top padding */
 #root > div:nth-child(1) > div > div > div > div {
-    padding-top: -3rem !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
 }
 
 /* Remove extra blank space before the title */
 .block-container {
-    padding-top: 0rem !important;  /* Reduce to smallest safe value */
-    padding-bottom: 3rem !important;
+    padding-top: 0 !important;  /* Reduce to smallest safe value */
+    padding-bottom: 1 !important;
 }
 
 /* Remove default header spacing */
 header[data-testid="stHeader"] {
-    height: -3px !important;
-    padding: -3px !important;
+    height: 0 !important;
+    padding: 0 !important;
 }
 
 /* Also remove the top banner shadow */
@@ -132,6 +126,7 @@ header[data-testid="stHeader"]::before {
 # ------------------- CSS -------------------
 # The above code is using HTML and CSS styling within a Python script to customize the appearance of
 # elements in a Streamlit web application.
+
 st.markdown("""
     <style>
     .main-title {
@@ -228,42 +223,37 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown("""
-<style>
+# st.markdown("""
+# <style>
 
-/* 🔹 Make all input labels white + bold */
-.stTextInput label, 
-.stSelectbox label,
-.stMultiSelect label,
-.stNumberInput label,
-.stTextArea label,
-.stDateInput label,
-.stTimeInput label,
-.streamlit-expanderHeader,
-.stRadio > label, 
-.stCheckbox > label,
-.stSlider > label {
-    color: #f1f140 !important;
-    font-weight: 700 !important;
-}
+# /* 🔹 Make all input labels white + bold */
+# .stTextInput label, 
+# .stSelectbox label,
+# .stMultiSelect label,
+# .stNumberInput label,
+# .stTextArea label,
+# .stDateInput label,
+# .stTimeInput label,
+# .streamlit-expanderHeader,
+# .stRadio > label, 
+# .stCheckbox > label,
+# .stSlider > label {
+#     color: #f1f140 !important;
+#     font-weight: 700 !important;
+# }
 
-/* Optional: change default text color of all elements */
-body, .stMarkdown, .css-ffhzg2 {
-    color: white !important;
-}
+# /* Optional: change default text color of all elements */
+# body, .stMarkdown, .css-ffhzg2 {
+#     color: white !important;
+# }
 
-/* Also applies to headings (Optional) */
-h2, h3, h4, h5, h6 {
-    color: white !important;
+# h1{
+#     color: #03b6fc !important;
 
-}
-h1{
-    color: #03b6fc !important;
+# }
 
-}
-
-</style>
-""", unsafe_allow_html=True)
+# </style>
+# """, unsafe_allow_html=True)
 st.markdown("""
 <style>
 :root, [data-theme="light"], [data-theme="dark"] {
@@ -291,6 +281,7 @@ def go_to(page):
 
 # ------------------- LOGIN PAGE -------------------
 if st.session_state.page == "login" and not st.session_state.logged_in:
+    add_bg_from_local("Election.png")
     st.markdown('<div class="main-title">🔐 Election Management Software</div>', unsafe_allow_html=True,)
     col1, col2, col3 = st.columns(3)
     with col2:
@@ -315,10 +306,6 @@ elif st.session_state.logged_in:
 
     # ---------------- SIDEBAR NAVIGATION ----------------
     with st.sidebar:
-        st.sidebar.markdown(
-            "<h1 css:>पर्याय</h1 >",
-            unsafe_allow_html=True
-        )
 
         if st.button(" Dashboard"):
             st.session_state.page = "dashboard"
@@ -360,49 +347,16 @@ elif st.session_state.logged_in:
     elif st.session_state.page == "survey":
         st.markdown('<div class="fixed-back-btn">', unsafe_allow_html=True)
         survey_page()
-        if st.button("⬅️ Back"): go_to("dashboard")
+        if st.button("⬅️ Back"): 
+            go_to("dashboard")
+            st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
-        # st.subheader("📋 सर्वेक्षण फॉर्म")
-        # with st.form("survey_form"):
-        #     col1, col2 = st.columns(2)
-        #     head_name = col1.text_input("कुटुंब प्रमुख नाव", "")
-        #     house_number = col2.text_input("घर क्रमांक", "")
-        #     col3, col4 = st.columns(2)
-        #     landmark = col3.text_input("LandMark", "")
-        #     address = col4.text_input("पत्ता", "")
-        #     mobile = st.text_input("मोबाईल नंबर", "")
-        #     col5, col6 = st.columns(2)
-        #     prabhag_number = col5.number_input("प्रभाव क्रमांक", value=0, step=1)
-        #     voters_count = col6.number_input("मतदारांची संख्या", value=0, step=1)
-        #     col7, col8 = st.columns(2)
-        #     male = col7.number_input("पुरुष", value=0, step=1)
-        #     female = col8.number_input("स्त्री", value=0, step=1)
-        #     caste = st.text_input("जात", "")
-
-        #     if st.form_submit_button("Submit"):
-        #         try:
-        #             conn = get_connection()
-        #             cursor = conn.cursor()
-        #             cursor.execute("""
-        #                 INSERT INTO SurveyData 
-        #                 (HeadName, HouseNumber, Landmark, Address, Mobile, PrabhagNumber, VotersCount, Male, Female, Caste)
-        #                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        #             """, (head_name, house_number, landmark, address, mobile, prabhag_number, voters_count, male, female, caste))
-        #             conn.commit()
-        #             st.success("✅ फॉर्म सबमिट झाला!")
-        #         except Exception as e:
-        #             st.error(f"❌ Error: {e}")
-        #         finally:
-        #             cursor.close()
-        #             conn.close() 
-
-    # #your full survey page code here
-        ...
 
     elif st.session_state.page == "search":
         # Streamlit back button handler
         if st.button("⬅️ Back"):
             go_to("dashboard")
+            st.rerun()
 
         st.subheader("🔍 शोधा पृष्ठ")
         try:

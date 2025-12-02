@@ -1,15 +1,7 @@
 import streamlit as st
 import pyodbc
 from router import go_to
-
-def get_connection():
-    return pyodbc.connect(
-        "DRIVER={ODBC Driver 17 for SQL Server};"
-        "SERVER=DNYANESHWAR\\MSSQLSERVER02;"
-        "DATABASE=Maharashtra;"
-        "UID=sa;"
-        "PWD=sa@123;"
-    )
+from router import get_connection
 
 
 def survey_page():
@@ -87,13 +79,16 @@ def survey_page():
         female_count = len([r for r in fam_rows if r.Sex == "F"])
 
         cursor.execute(
-            "SELECT SectionNo, VAddress FROM VoterList WHERE VoterID = ?",
+            "SELECT SectionNo,Sex, Age,VAddress,PartNo FROM VoterList WHERE VoterID = ?",
             (family_head_id,)
         )
         head_row = cursor.fetchone()
         if head_row:
             section_no = head_row.SectionNo
             address_autofill = head_row.VAddress
+            head_sex = head_row.Sex
+            head_part = head_row.PartNo
+            head_age = head_row.Age
 
     col1, col2 = st.columns(2)
 
@@ -102,7 +97,13 @@ def survey_page():
     # -----------------------------------------------------
     with col2:
         house_number = st.text_input("घर क्रमांक", "", key=f"house_{V}")
-        mobile = st.text_input("मोबाईल नंबर", key=f"mobile_{V}")
+        # mobile = st.text_input("मोबाईल नंबर", key=f"mobile_{V}")
+        aaa = st.text_input("Enter Mobile Number (10 digits)", key=f"mobile_{V}")
+        if aaa:
+            if aaa.isdigit() and len(aaa) == 10:
+                mobile = aaa
+            else:
+                st.error("Invalid — only digits allowed and must be exactly 10 digits")
         landmark = st.text_input("Landmark", key=f"lm_{V}")
         caste = st.text_input("जात (Optional)", key=f"caste_{V}")
 
@@ -116,7 +117,7 @@ def survey_page():
 
     visited = st.radio(
         "Visited?",
-        ("Yes", "No"),
+        ("Yes"),
         key=f"visited_{V}"
     )
     visited_value = 1 if visited == "Yes" else 0
@@ -135,14 +136,13 @@ def survey_page():
         try:
             cursor.execute("""
                 INSERT INTO SurveyData 
-                (HeadName, HouseNumber, Landmark, Address, Mobile, 
-                PrabhagNumber, VotersCount, Male, Female, Caste)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (VoterID, VEName, HouseNo, Landmark, VAddress, Mobile, 
+                SectionNo, VotersCount, Male, Female, Caste, Sex, PartNo,Age)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?)
             """, (
-                head_name_display, house_number, landmark, address_autofill, mobile,
-                section_no, total_voters, male_count, female_count, caste
+                family_head_id, head_name_display, house_number, landmark, address_autofill, mobile,
+                section_no, total_voters, male_count, female_count, caste, head_sex, head_part,head_age
             ))
-
             placeholder = ",".join("?" * len(selected_family_ids))
             cursor.execute(
                 f"UPDATE VoterList SET Visited = ? WHERE VoterID IN ({placeholder})",
@@ -156,7 +156,7 @@ def survey_page():
             # RESET ALL WIDGETS BY CHANGING VERSION
             # -----------------------------------------------------
             st.session_state.widget_version += 1
-            st.rerun()
+            # st.rerun()
 
         except Exception as e:
             st.error(f"❌ Error: {e}")

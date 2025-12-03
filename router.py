@@ -1,4 +1,4 @@
-import pyodbc
+
 import psycopg2
 def go_to(page):
     return page

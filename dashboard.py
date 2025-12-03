@@ -304,7 +304,6 @@
 #         )
 
 import streamlit as st
-import pyodbc
 import pandas as pd
 import plotly.express as px
 from reportlab.lib.utils import ImageReader

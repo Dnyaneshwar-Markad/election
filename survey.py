@@ -1,22 +1,23 @@
 import streamlit as st
-import pyodbc
-from router import go_to
+import psycopg2
+import psycopg2.extras
 from router import get_connection
 
 
 def survey_page():
+
     # -----------------------------------------------------
-    # WIDGET VERSION HANDLER (MAIN LOGIC)
+    # VERSION RESETTER (FOR CLEARING WIDGETS)
     # -----------------------------------------------------
     if "widget_version" not in st.session_state:
         st.session_state.widget_version = 1
 
-    V = st.session_state.widget_version   # short alias
+    V = st.session_state.widget_version
 
     st.subheader("📋 सर्वेक्षण फॉर्म")
 
     conn = get_connection()
-    cursor = conn.cursor()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
     # -----------------------------------------------------
     # SEARCH BAR
@@ -27,19 +28,24 @@ def survey_page():
     )
 
     voter_results = []
+
     if search_name.strip():
         cursor.execute("""
-            SELECT VoterID, EName, VEName, HouseNo, SectionNo, Sex, VAddress 
-            FROM VoterList
-            WHERE EName LIKE ?
-        """, ('%' + search_name + '%',))
+            SELECT "VoterID", "EName", "VEName", "HouseNo", "SectionNo", "Sex", "VAddress"
+            FROM "VoterList"
+            WHERE "EName" ILIKE %s
+        """, (f"%{search_name}%",))
         voter_results = cursor.fetchall()
 
+    # Dropdown text → voterID mapping
     merged_options = {
-        f"{row.EName} ({row.VEName}) - {row.HouseNo}": row.VoterID
+        f'{row["EName"]} ({row["VEName"]}) - {row["HouseNo"]}': row["VoterID"]
         for row in voter_results
     }
 
+    # -----------------------------------------------------
+    # FAMILY SELECTION
+    # -----------------------------------------------------
     family_selected = st.multiselect(
         "Select Family Members",
         options=list(merged_options.keys()),
@@ -48,14 +54,20 @@ def survey_page():
 
     selected_family_ids = [merged_options[x] for x in family_selected]
 
-    head_name_display = ""
+    # Default values
     family_head_id = None
+    head_sex = ""
+    head_age = None
+    head_part = None
     section_no = ""
     address_autofill = ""
     total_voters = 0
     male_count = 0
     female_count = 0
 
+    # -----------------------------------------------------
+    # HEAD SELECTION & AUTO-FILL
+    # -----------------------------------------------------
     if selected_family_ids:
 
         head_choice = st.selectbox(
@@ -65,45 +77,56 @@ def survey_page():
         )
 
         family_head_id = merged_options[head_choice]
-        head_name_display = head_choice
 
-        placeholder = ",".join("?" * len(selected_family_ids))
+        # Fetch all selected voters
+        placeholder = ",".join(["%s"] * len(selected_family_ids))
         cursor.execute(
-            f"SELECT VoterID, Sex, SectionNo, VAddress FROM VoterList WHERE VoterID IN ({placeholder})",
+            f"""
+            SELECT "VoterID", "Sex", "SectionNo", "VAddress"
+            FROM "VoterList"
+            WHERE "VoterID" IN ({placeholder})
+            """,
             selected_family_ids
         )
         fam_rows = cursor.fetchall()
 
+        # Count summary
         total_voters = len(fam_rows)
-        male_count = len([r for r in fam_rows if r.Sex == "M"])
-        female_count = len([r for r in fam_rows if r.Sex == "F"])
+        male_count = len([r for r in fam_rows if r["Sex"] == "M"])
+        female_count = len([r for r in fam_rows if r["Sex"] == "F"])
 
-        cursor.execute(
-            "SELECT SectionNo,Sex, Age,VAddress,PartNo FROM VoterList WHERE VoterID = ?",
-            (family_head_id,)
-        )
-        head_row = cursor.fetchone()
-        if head_row:
-            section_no = head_row.SectionNo
-            address_autofill = head_row.VAddress
-            head_sex = head_row.Sex
-            head_part = head_row.PartNo
-            head_age = head_row.Age
+        # Head details
+        cursor.execute("""
+            SELECT "SectionNo", "Sex", "Age", "VAddress", "PartNo"
+            FROM "VoterList"
+            WHERE "VoterID" = %s
+        """, (family_head_id,))
+        head = cursor.fetchone()
 
+        if head:
+            section_no = head["SectionNo"]
+            head_sex = head["Sex"]
+            head_age = head["Age"]
+            head_part = head["PartNo"]
+            address_autofill = head["VAddress"]
+
+    # -----------------------------------------------------
+    # FAMILY DETAIL WIDGETS (right column)
+    # -----------------------------------------------------
     col1, col2 = st.columns(2)
 
-    # -----------------------------------------------------
-    # FAMILY DETAILS
-    # -----------------------------------------------------
     with col2:
         house_number = st.text_input("घर क्रमांक", "", key=f"house_{V}")
-        # mobile = st.text_input("मोबाईल नंबर", key=f"mobile_{V}")
-        aaa = st.text_input("Enter Mobile Number (10 digits)", key=f"mobile_{V}")
-        if aaa:
-            if aaa.isdigit() and len(aaa) == 10:
-                mobile = aaa
+
+        mob_input = st.text_input("Enter Mobile Number (10 digits)", key=f"mobile_{V}")
+
+        mobile = None
+        if mob_input:
+            if mob_input.isdigit() and len(mob_input) == 10:
+                mobile = mob_input
             else:
                 st.error("Invalid — only digits allowed and must be exactly 10 digits")
+
         landmark = st.text_input("Landmark", key=f"lm_{V}")
         caste = st.text_input("जात (Optional)", key=f"caste_{V}")
 
@@ -115,11 +138,7 @@ def survey_page():
         right.number_input("स्त्री", value=female_count, disabled=True, key=f"f_{V}")
         address = st.text_area("पत्ता", value=address_autofill, disabled=True, key=f"addr_{V}")
 
-    visited = st.radio(
-        "Visited?",
-        ("Yes"),
-        key=f"visited_{V}"
-    )
+    visited = st.radio("Visited?", ("Yes", "No"), key=f"visited_{V}")
     visited_value = 1 if visited == "Yes" else 0
 
     # -----------------------------------------------------
@@ -130,35 +149,41 @@ def survey_page():
         if not selected_family_ids:
             st.error("❌ कृपया किमान एक कुटुंब सदस्य निवडा!")
             return
+
         if not mobile:
             st.error("❌ कृपया मोबाईल नंबर द्या!")
             return
+
         try:
+            # Insert into SurveyData
             cursor.execute("""
-                INSERT INTO SurveyData 
-                (VoterID, VEName, HouseNo, Landmark, VAddress, Mobile, 
-                SectionNo, VotersCount, Male, Female, Caste, Sex, PartNo,Age)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?)
+                INSERT INTO "SurveyData"
+                ("VoterID", "VEName", "HouseNo", "Landmark", "VAddress", "Mobile",
+                 "SectionNo", "VotersCount", "Male", "Female", "Caste",
+                 "Sex", "PartNo", "Age")
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
-                family_head_id, head_name_display, house_number, landmark, address_autofill, mobile,
-                section_no, total_voters, male_count, female_count, caste, head_sex, head_part,head_age
+                family_head_id, head_choice, house_number, landmark, address_autofill,
+                mobile, section_no, total_voters, male_count, female_count,
+                caste, head_sex, head_part, head_age
             ))
-            placeholder = ",".join("?" * len(selected_family_ids))
+
+            # Mark visited in VoterList
+            placeholder = ",".join(["%s"] * len(selected_family_ids))
             cursor.execute(
-                f"UPDATE VoterList SET Visited = ? WHERE VoterID IN ({placeholder})",
+                f"""UPDATE "VoterList" SET "Visited" = %s WHERE "VoterID" IN ({placeholder})""",
                 [visited_value] + selected_family_ids
             )
 
             conn.commit()
             st.success("✅ सर्वेक्षण फॉर्म सबमिट झाला!")
 
-            # -----------------------------------------------------
-            # RESET ALL WIDGETS BY CHANGING VERSION
-            # -----------------------------------------------------
+            # Reset UI
             st.session_state.widget_version += 1
-            # st.rerun()
+            st.rerun()
 
         except Exception as e:
+            conn.rollback()
             st.error(f"❌ Error: {e}")
 
         finally:

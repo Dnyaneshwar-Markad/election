@@ -1,5 +1,5 @@
-﻿import streamlit as st
-import pyodbc
+﻿# sa.py (PostgreSQL-safe, keeps original layout/UI)
+import streamlit as st
 import urllib.parse
 import pandas as pd
 import plotly.express as px
@@ -14,36 +14,92 @@ from dashboard import dashboard_page
 from survey import survey_page
 from router import get_connection
 import os
+import psycopg2
+import psycopg2.extras
+from types import SimpleNamespace
+
 # ------------------- APP CONFIG -------------------
 st.set_page_config(page_title="Election Management Software", page_icon="favicon.png", layout="wide")
 
-# ------------------- DB CONNECTION -------------------
+# ------------------- Helpers -------------------
+def dict_row_to_namespace(d: dict):
+    """
+    Convert a dict returned by RealDictCursor to a SimpleNamespace
+    and add common alias attributes for compatibility (UserID <-> UserId, Username <-> UserName, ParentID <-> ParentId).
+    """
+    if d is None:
+        return None
+    # normalize keys to exact-case map (keep original keys too)
+    ns = SimpleNamespace(**d)
+    # add aliases for user table differences
+    # only if related keys exist
+    if "UserID" in d and not hasattr(ns, "UserId"):
+        setattr(ns, "UserId", d.get("UserID"))
+    if "UserId" in d and not hasattr(ns, "UserID"):
+        setattr(ns, "UserID", d.get("UserId"))
+    if "Username" in d and not hasattr(ns, "UserName"):
+        setattr(ns, "UserName", d.get("Username"))
+    if "UserName" in d and not hasattr(ns, "Username"):
+        setattr(ns, "Username", d.get("UserName"))
+    if "ParentID" in d and not hasattr(ns, "ParentId"):
+        setattr(ns, "ParentId", d.get("ParentID"))
+    if "ParentId" in d and not hasattr(ns, "ParentID"):
+        setattr(ns, "ParentID", d.get("ParentId"))
+    return ns
 
-# ------------------- FETCH VOTERS -------------------
-def fetch_voters():
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT VEName, HouseNo, VPSName, EName, PSName, VAddress, SectionNo, Sex, Age, IDCardNo
-        FROM VoterList
-    """)
+def fetchall_as_ns(cursor):
+    """Fetch all rows from a RealDictCursor and convert to SimpleNamespace objects (attribute access)."""
     rows = cursor.fetchall()
-    conn.close()
-    return rows
+    return [dict_row_to_namespace(r) for r in rows]
+
+def fetchone_as_ns(cursor):
+    r = cursor.fetchone()
+    return dict_row_to_namespace(r) if r else None
+
+# ------------------- FETCH VOTERS (returns list of SimpleNamespace rows) -------------------
+def fetch_voters():
+    conn = None
+    try:
+        conn = get_connection()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute("""
+            SELECT "VEName", "HouseNo", "VPSName", "EName", "PSName", "VAddress", "SectionNo", "Sex", "Age", "IDCardNo"
+            FROM "VoterList"
+        """)
+        rows = fetchall_as_ns(cursor)
+        return rows
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
 
 # ------------------- VALIDATE USER -------------------
 def validate_user(username, password):
+    """
+    Returns a SimpleNamespace with user attributes (or None).
+    Provides alias attributes so calling code can use user.UserId or user.UserID etc.
+    """
+    conn = None
     try:
         conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT UserId, UserName, Role, ParentId FROM Users WHERE UserName=? AND Password=?", (username, password))
-        user = cursor.fetchone()
-        conn.close()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute("""
+            SELECT "UserID", "Username", "Password", "Role", "ParentID", "CreatedAt"
+            FROM "User"
+            WHERE "Username" = %s AND "Password" = %s
+            LIMIT 1
+        """, (username, password))
+        user = fetchone_as_ns(cursor)
         return user
     except Exception as e:
         st.error(f"❌ DB Error: {e}")
         return None
-    
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
 
 # ------------------- BACKGROUND IMAGE -------------------
 def add_bg_from_local(image_file):
@@ -64,10 +120,6 @@ def add_bg_from_local(image_file):
         """,
         unsafe_allow_html=True
     )
-
-# Call the function with your image
-# add_bg_from_local("Election.png")
-
 
 # ------------------- FOOTER -------------------
 st.markdown("""
@@ -95,7 +147,7 @@ st.markdown("""
     </div>
 """, unsafe_allow_html=True)
 
-# Remove Streamlit top padding / margin
+# Remove Streamlit top padding / margin (unchanged)
 st.markdown("""
 <style>
 /* Remove global top padding */
@@ -123,10 +175,7 @@ header[data-testid="stHeader"]::before {
 </style>
 """, unsafe_allow_html=True)
 
-# ------------------- CSS -------------------
-# The above code is using HTML and CSS styling within a Python script to customize the appearance of
-# elements in a Streamlit web application.
-
+# ------------------- CSS (unchanged) -------------------
 st.markdown("""
     <style>
     .main-title {
@@ -223,37 +272,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# st.markdown("""
-# <style>
-
-# /* 🔹 Make all input labels white + bold */
-# .stTextInput label, 
-# .stSelectbox label,
-# .stMultiSelect label,
-# .stNumberInput label,
-# .stTextArea label,
-# .stDateInput label,
-# .stTimeInput label,
-# .streamlit-expanderHeader,
-# .stRadio > label, 
-# .stCheckbox > label,
-# .stSlider > label {
-#     color: #f1f140 !important;
-#     font-weight: 700 !important;
-# }
-
-# /* Optional: change default text color of all elements */
-# body, .stMarkdown, .css-ffhzg2 {
-#     color: white !important;
-# }
-
-# h1{
-#     color: #03b6fc !important;
-
-# }
-
-# </style>
-# """, unsafe_allow_html=True)
 st.markdown("""
 <style>
 :root, [data-theme="light"], [data-theme="dark"] {
@@ -261,7 +279,6 @@ st.markdown("""
 }
 </style>
 """, unsafe_allow_html=True)
-
 
 
 # ------------------- SESSION STATES -------------------
@@ -278,11 +295,10 @@ def go_to(page):
     st.session_state.page = page
 
 
-
 # ------------------- LOGIN PAGE -------------------
 if st.session_state.page == "login" and not st.session_state.logged_in:
     add_bg_from_local("Election.png")
-    st.markdown('<div class="main-title">🔐 Election Management Software</div>', unsafe_allow_html=True,)
+    st.markdown('<div class="main-title">🔐 Election Management Software</div>', unsafe_allow_html=True)
     col1, col2, col3 = st.columns(3)
     with col2:
         username = st.text_input("👤 Username")
@@ -292,14 +308,15 @@ if st.session_state.page == "login" and not st.session_state.logged_in:
             user = validate_user(username, password)
             if user:
                 st.session_state.logged_in = True
-                st.success("✅ Login Successful!")           
+                st.success("✅ Login Successful!")
                 st.session_state.page = "dashboard"
-                st.session_state.user_id = user.UserId
-                st.session_state.role = user.Role            
+                # provide both attribute spellings for compatibility
+                st.session_state.user_id = getattr(user, "UserId", getattr(user, "UserID", None))
+                st.session_state.role = getattr(user, "Role", None)
                 st.rerun()
             else:
                 st.error("❌ Invalid Username or Password")
-                
+
 
 # ------------------- MAIN APP AFTER LOGIN -------------------
 elif st.session_state.logged_in:
@@ -309,7 +326,7 @@ elif st.session_state.logged_in:
 
         if st.button(" Dashboard"):
             st.session_state.page = "dashboard"
-        
+
         if st.button("🔍\nशोधा"):
             st.session_state.page = "search"
 
@@ -323,7 +340,7 @@ elif st.session_state.logged_in:
             st.session_state.page = "data"
 
         # Admin-only pages
-        if st.session_state.role == "admin":
+        if (st.session_state.role or "").lower() == "admin":
             if st.button("⚙️\nसेटिंग्स"):
                 st.session_state.page = "settings"
 
@@ -342,12 +359,10 @@ elif st.session_state.logged_in:
     if st.session_state.page == "dashboard":
         dashboard_page()
 
-    # The above code is a Python script that handles a survey form submission in a Streamlit web
-    # application. Here is a breakdown of what the code does:
     elif st.session_state.page == "survey":
         st.markdown('<div class="fixed-back-btn">', unsafe_allow_html=True)
         survey_page()
-        if st.button("⬅️ Back"): 
+        if st.button("⬅️ Back"):
             go_to("dashboard")
             st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
@@ -374,12 +389,13 @@ elif st.session_state.logged_in:
         if query.strip():
             nq = normalize_text(query)
             for r in rows:
+                # r is SimpleNamespace so attribute access remains same
                 if (
-                nq in normalize_text(r.VEName) or
-                nq in normalize_text(r.VPSName) or
-                nq in normalize_text(r.EName) or
-                nq in normalize_text(r.PSName)
-            ):
+                    nq in normalize_text(getattr(r, "VEName", "")) or
+                    nq in normalize_text(getattr(r, "VPSName", "")) or
+                    nq in normalize_text(getattr(r, "EName", "")) or
+                    nq in normalize_text(getattr(r, "PSName", ""))
+                ):
                     filtered.append(r)
         else:
             filtered = rows
@@ -390,19 +406,19 @@ elif st.session_state.logged_in:
         st.markdown('<div class="scroll-container">', unsafe_allow_html=True)
         for r in filtered:
             mobile_no = str(getattr(r, "VAddress", "")).strip()
-            voter_name = r.VEName
+            voter_name = getattr(r, "VEName", "")
 
             col1, col2 = st.columns([1, 6])
             with col1:
                 if mobile_no:
                     if st.checkbox("✔", key=f"chk_{voter_name}_{mobile_no}"):
                         selected_voters.append({
-                        "name": voter_name,
-                        "house": r.HouseNo,
-                        "psname": r.VPSName,
-                        "mobile": mobile_no,
-                        "SlNo": getattr(r, "SectionNo", ""),   # Add section number
-                        "IDCardNo": getattr(r, "IDCardNo", "")
+                            "name": voter_name,
+                            "house": getattr(r, "HouseNo", ""),
+                            "psname": getattr(r, "VPSName", ""),
+                            "mobile": mobile_no,
+                            "SlNo": getattr(r, "SectionNo", ""),   # Add section number
+                            "IDCardNo": getattr(r, "IDCardNo", "")
                         })
             with col2:
                 st.markdown(f"""
@@ -410,18 +426,17 @@ elif st.session_state.logged_in:
                         <img src="{dummy_img}" class="voter-img"/>
                         <div class="voter-info">
                             <div class="voter-name">{voter_name}</div>
-                            <div class="voter-details"><b>घर क्रमांक:</b> {r.HouseNo} </div>
-                            <div class="voter-details"><b>पत्ता:</b> {r.VAddress}</div>
+                            <div class="voter-details"><b>घर क्रमांक:</b> {getattr(r, "HouseNo", "")} </div>
+                            <div class="voter-details"><b>पत्ता:</b> {getattr(r, "VAddress", "")}</div>
                         </div>
                     </div>
                 """, unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
-    # 🔗 Show Share Button on Top if voters selected
+        # 🔗 Show Share Button on Top if voters selected
         if selected_voters:
             st.success(f"✅ निवडलेले {len(selected_voters)} मतदार")
 
-        # Share button on top (below back button)
             if "show_share_form" not in st.session_state:
                 st.session_state.show_share_form = False
 
@@ -437,7 +452,7 @@ elif st.session_state.logged_in:
                         fixed_message = "नमस्कार,\n\n"
                         details = "\n".join(
                             [f"*नाव :* {v['name']} \n*यादीभाग :* {v['SlNo']} \n*मतदान कार्ड :* {v['IDCardNo']}  \n*मतदान केंद्र :* {v['psname']} \n"
-                            for v in selected_voters]
+                             for v in selected_voters]
                         )
                         full_message = fixed_message + details
 
@@ -445,7 +460,6 @@ elif st.session_state.logged_in:
                         wa_link = f"https://wa.me/91{recipient}?text={encoded_msg}"
 
                         st.markdown(f"[👉 WhatsApp वर संदेश पाठवा]({wa_link})", unsafe_allow_html=True)
-
 
     # ------------------- LIST PAGE -------------------
     elif st.session_state.page == "list":
@@ -456,7 +470,8 @@ elif st.session_state.logged_in:
 
         try:
             conn = get_connection()
-            df = pd.read_sql("SELECT * FROM VoterList", conn)
+            # Use quoted table name for PostgreSQL
+            df = pd.read_sql('SELECT * FROM "VoterList"', conn)
             conn.close()
         except Exception as e:
             st.error(f"❌ डेटाबेस एरर: {e}")
@@ -524,9 +539,8 @@ elif st.session_state.logged_in:
             st.markdown("</div>", unsafe_allow_html=True)
         else:
             st.warning("⚠️ डेटा उपलब्ध नाही")
-        # your full search page code here
-        ...
 
+    # ------------------- DATA PAGE -------------------
     elif st.session_state.page == "data":
         st.markdown('<div class="fixed-back-btn">', unsafe_allow_html=True)
         if st.button("⬅️ Back"): go_to("dashboard")
@@ -535,8 +549,8 @@ elif st.session_state.logged_in:
 
         try:
             conn = get_connection()
-            df = pd.read_sql("SELECT SUM(Male) AS TotalMale, SUM(Female) AS TotalFemale FROM SurveyData", conn)
-            caste_df = pd.read_sql("SELECT Caste, SUM(VotersCount) AS TotalVoters FROM SurveyData GROUP BY Caste", conn)
+            df = pd.read_sql('SELECT SUM("Male") AS "TotalMale", SUM("Female") AS "TotalFemale" FROM "SurveyData"', conn)
+            caste_df = pd.read_sql('SELECT "Caste", SUM("VotersCount") AS "TotalVoters" FROM "SurveyData" GROUP BY "Caste"', conn)
             conn.close()
         except Exception as e:
             st.error(f"❌ डेटाबेस एरर: {e}")
@@ -551,133 +565,147 @@ elif st.session_state.logged_in:
                 st.plotly_chart(px.pie(caste_df, names="Caste", values="TotalVoters", hole=0.4), use_container_width=True)
         else:
             st.warning("⚠️ डेटा उपलब्ध नाही")
-        # your data page
-        ...
 
+    # ------------------- SETTINGS -------------------
     elif st.session_state.page == "settings":
-            # ✅ Only admin can access
-            if st.session_state.role.lower() != "admin":
-                st.warning("⚠️ तुम्हाला सेटिंग्ज पृष्ठावर प्रवेश नाही")
-                go_to("home")
-            else:
-                st.markdown('<div class="fixed-back-btn">', unsafe_allow_html=True)
-                if st.button("⬅️ Back"): 
-                    go_to("dashboard")
-                st.markdown('</div>', unsafe_allow_html=True)
-
-                st.subheader("⚙️ युजर तयार करा")
-
-                with st.form("create_user_form"):
-                    new_username = st.text_input("👤 नवीन युजरनेम")
-                    new_password = st.text_input("🔑 पासवर्ड", type="password")
-                    new_role = st.selectbox("🛡️ भूमिका निवडा", ["subuser"])  # ✅ restrict to 'user' only
-                    submit_user = st.form_submit_button("➕ युजर तयार करा")
-
-                    if submit_user:
-                        if new_username and new_password:
-                            try:
-                                conn = get_connection()
-                                cursor = conn.cursor()
-                                cursor.execute("""
-                                    INSERT INTO Users (UserName, Password, Role, ParentId, CreatedAt)
-                                    VALUES (?, ?, ?, ?, GETDATE())
-                                """, (new_username, new_password, new_role.lower(), st.session_state.user_id))
-                                conn.commit()
-                                st.success(f"✅ युजर '{new_username}' यशस्वीरित्या तयार झाला")
-                            except Exception as e:
-                                st.error(f"❌ Error: {e}")
-                            finally:
-                                cursor.close()
-                                conn.close()
-                        else:
-                            st.warning("⚠️ कृपया युजरनेम आणि पासवर्ड भरा")
-
-                # ✅ Show list of users created under this admin
-                st.markdown("---")
-                st.subheader("👥 तुमच्या अंतर्गत युजर")
-
-                try:
-                    conn = get_connection()
-                    cursor = conn.cursor()
-                    cursor.execute("""
-                        SELECT UserID, UserName, Role, CreatedAt 
-                        FROM Users 
-                        WHERE ParentId = ?
-                        ORDER BY CreatedAt DESC
-                    """, (st.session_state.user_id,))
-                    rows = cursor.fetchall()
-                    if rows:
-                        for r in rows:
-                            st.markdown(f"""
-                                - 👤 **{r.UserName}**  
-                                    🛡️ भूमिका: {r.Role}  
-                                    📅 तयार दिनांक: {r.CreatedAt}
-                            """)
-                    else:
-                        st.info("❕ अजून कोणतेही युजर तयार नाहीत")
-                except Exception as e:
-                    st.error(f"❌ Error fetching users: {e}")
-                finally:
-                    cursor.close()
-                    conn.close()
-
-    elif st.session_state.page == "whatsapp":
-        if st.session_state.role.lower() != "admin":
-                st.warning("⚠️ तुम्हाला सेटिंग्ज पृष्ठावर प्रवेश नाही")
-                go_to("home")
+        # ✅ Only admin can access
+        if (st.session_state.role or "").lower() != "admin":
+            st.warning("⚠️ तुम्हाला सेटिंग्ज पृष्ठावर प्रवेश नाही")
+            go_to("home")
         else:
             st.markdown('<div class="fixed-back-btn">', unsafe_allow_html=True)
-            if st.button("⬅️ Back"): 
+            if st.button("⬅️ Back"):
+                go_to("dashboard")
+            st.markdown('</div>', unsafe_allow_html=True)
+
+            st.subheader("⚙️ युजर तयार करा")
+
+            with st.form("create_user_form"):
+                new_username = st.text_input("👤 नवीन युजरनेम")
+                new_password = st.text_input("🔑 पासवर्ड", type="password")
+                new_role = st.selectbox("🛡️ भूमिका निवडा", ["subuser"])  # ✅ restrict to 'user' only
+                submit_user = st.form_submit_button("➕ युजर तयार करा")
+
+                if submit_user:
+                    if new_username and new_password:
+                        conn = None
+                        cursor = None
+                        try:
+                            conn = get_connection()
+                            cursor = conn.cursor()
+                            # Insert into "User" table (Postgres-safe)
+                            cursor.execute("""
+                                INSERT INTO "User" ("Username", "Password", "Role", "ParentID", "CreatedAt")
+                                VALUES (%s, %s, %s, %s, NOW())
+                            """, (new_username, new_password, new_role.lower(), st.session_state.user_id))
+                            conn.commit()
+                            st.success(f"✅ युजर '{new_username}' यशस्वीरित्या तयार झाला")
+                        except Exception as e:
+                            st.error(f"❌ Error: {e}")
+                            if conn:
+                                conn.rollback()
+                        finally:
+                            if cursor:
+                                cursor.close()
+                            if conn:
+                                conn.close()
+                    else:
+                        st.warning("⚠️ कृपया युजरनेम आणि पासवर्ड भरा")
+
+            # ✅ Show list of users created under this admin
+            st.markdown("---")
+            st.subheader("👥 तुमच्या अंतर्गत युजर")
+
+            try:
+                conn = get_connection()
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cursor.execute("""
+                    SELECT "UserID", "Username", "Role", "CreatedAt"
+                    FROM "User"
+                    WHERE "ParentID" = %s
+                    ORDER BY "CreatedAt" DESC
+                """, (st.session_state.user_id,))
+                rows = fetchall_as_ns(cursor)
+                if rows:
+                    for r in rows:
+                        st.markdown(f"""
+                            - 👤 **{getattr(r, 'Username', '')}**  
+                                🛡️ भूमिका: {getattr(r, 'Role', '')}  
+                                📅 तयार दिनांक: {getattr(r, 'CreatedAt', '')}
+                        """)
+                else:
+                    st.info("❕ अजून कोणतेही युजर तयार नाहीत")
+            except Exception as e:
+                st.error(f"❌ Error fetching users: {e}")
+            finally:
+                try:
+                    if cursor:
+                        cursor.close()
+                    if conn:
+                        conn.close()
+                except:
+                    pass
+
+    # ------------------- WHATSAPP -------------------
+    elif st.session_state.page == "whatsapp":
+        if (st.session_state.role or "").lower() != "admin":
+            st.warning("⚠️ तुम्हाला सेटिंग्ज पृष्ठावर प्रवेश नाही")
+            go_to("home")
+        else:
+            st.markdown('<div class="fixed-back-btn">', unsafe_allow_html=True)
+            if st.button("⬅️ Back"):
                 go_to("dashboard")
             st.markdown('</div>', unsafe_allow_html=True)
             st.title("💬 WhatsApp Tools")
             st.write("WhatsApp automation features")
 
-    # ------------------- ADVANCED SEARCH PAGE -------------------
-    elif st.session_state.page == "adv_search":
-        st.markdown('<div class="fixed-back-btn">', unsafe_allow_html=True)
-        if st.button("⬅️ Back"): go_to("dashboard")
-        st.markdown('</div>', unsafe_allow_html=True)
-        st.subheader("🔎 आधुनिक पद्धतीने शोध")
+# End of sa.py
 
-        try:
-            conn = get_connection()
-            df = pd.read_sql("SELECT * FROM VoterList", conn)
-            conn.close()
-        except Exception as e:
-            st.error(f"❌ डेटाबेस एरर: {e}")
-            df = pd.DataFrame()
+    # # ------------------- ADVANCED SEARCH PAGE -------------------
+    # elif st.session_state.page == "adv_search":
+    #     st.markdown('<div class="fixed-back-btn">', unsafe_allow_html=True)
+    #     if st.button("⬅️ Back"): go_to("dashboard")
+    #     st.markdown('</div>', unsafe_allow_html=True)
+    #     st.subheader("🔎 आधुनिक पद्धतीने शोध")
 
-        if not df.empty:
-            with st.form("adv_search_form"):
-                col1, col2, col3 = st.columns(3)
-                section_filter = col1.selectbox("विभाग क्रमांक", ["All"] + sorted(df["SectionNo"].dropna().unique()))
-                age_filter = col2.number_input("वय", min_value=0, max_value=120, value=0)
-                sex_filter = col3.selectbox("लिंग", ["All"] + sorted(df["Sex"].dropna().unique()))
-                submitted = st.form_submit_button("🔍 शोधा")
+    #     try:
+    #         conn = get_connection()
+    #         df = pd.read_sql("SELECT * FROM VoterList", conn)
+    #         conn.close()
+    #     except Exception as e:
+    #         st.error(f"❌ डेटाबेस एरर: {e}")
+    #         df = pd.DataFrame()
 
-            filtered_df = df.copy()
-            if submitted:
-                if section_filter != "All": filtered_df = filtered_df[filtered_df["SectionNo"] == section_filter]
-                if age_filter > 0: filtered_df = filtered_df[filtered_df["Age"] == age_filter]
-                if sex_filter != "All": filtered_df = filtered_df[filtered_df["Sex"] == sex_filter]
+    #     if not df.empty:
+    #         with st.form("adv_search_form"):
+    #             col1, col2, col3 = st.columns(3)
+    #             section_filter = col1.selectbox("विभाग क्रमांक", ["All"] + sorted(df["SectionNo"].dropna().unique()))
+    #             age_filter = col2.number_input("वय", min_value=0, max_value=120, value=0)
+    #             sex_filter = col3.selectbox("लिंग", ["All"] + sorted(df["Sex"].dropna().unique()))
+    #             submitted = st.form_submit_button("🔍 शोधा")
 
-            st.info(f"🔎 सापडलेले मतदार: **{len(filtered_df)}**")
+    #         filtered_df = df.copy()
+    #         if submitted:
+    #             if section_filter != "All": filtered_df = filtered_df[filtered_df["SectionNo"] == section_filter]
+    #             if age_filter > 0: filtered_df = filtered_df[filtered_df["Age"] == age_filter]
+    #             if sex_filter != "All": filtered_df = filtered_df[filtered_df["Sex"] == sex_filter]
 
-            st.markdown('<div class="scroll-container">', unsafe_allow_html=True)
-            for _, r in filtered_df.iterrows():
-                st.markdown(f"""
-                    <div class="voter-card">
-                        <img src="https://cdn-icons-png.flaticon.com/512/1946/1946429.png" class="voter-img"/>
-                        <div class="voter-info">
-                            <div class="voter-name">{r.get('VEName','')}</div>
-                            <div class="voter-details">घर क्रमांक: {r.get('HouseNo','')} | विभाग: {r.get('SectionNo','')}<br/>लिंग: {r.get('Sex','')} | वय: {r.get('Age','')}</div>
-                        </div>
-                    </div>
-                """, unsafe_allow_html=True)
-            st.markdown("</div>", unsafe_allow_html=True)
-        else:
-            st.warning("⚠️ डेटा उपलब्ध नाही")
+    #         st.info(f"🔎 सापडलेले मतदार: **{len(filtered_df)}**")
+
+    #         st.markdown('<div class="scroll-container">', unsafe_allow_html=True)
+    #         for _, r in filtered_df.iterrows():
+    #             st.markdown(f"""
+    #                 <div class="voter-card">
+    #                     <img src="https://cdn-icons-png.flaticon.com/512/1946/1946429.png" class="voter-img"/>
+    #                     <div class="voter-info">
+    #                         <div class="voter-name">{r.get('VEName','')}</div>
+    #                         <div class="voter-details">घर क्रमांक: {r.get('HouseNo','')} | विभाग: {r.get('SectionNo','')}<br/>लिंग: {r.get('Sex','')} | वय: {r.get('Age','')}</div>
+    #                     </div>
+    #                 </div>
+    #             """, unsafe_allow_html=True)
+    #         st.markdown("</div>", unsafe_allow_html=True)
+    #     else:
+    #         st.warning("⚠️ डेटा उपलब्ध नाही")
 
 
 

@@ -139,7 +139,7 @@ def survey_page():
         address = st.text_area("पत्ता", value=address_autofill, disabled=True, key=f"addr_{V}")
 
     visited = st.radio("Visited?", ("Yes"), key=f"visited_{V}")
-    visited_value = 1 if visited == "Yes" else 0
+    visited_value = True if visited == "Yes" else False
 
     # -----------------------------------------------------
     # SUBMIT BUTTON
@@ -171,7 +171,7 @@ def survey_page():
             # Mark visited in VoterList
             placeholder = ",".join(["%s"] * len(selected_family_ids))
             cursor.execute(
-                f"""UPDATE "VoterList" SET "Visited" = %b WHERE "VoterID" IN ({placeholder})""",
+                f"""UPDATE "VoterList" SET "Visited" = %s WHERE "VoterID" IN ({placeholder})""",
                 [visited_value] + selected_family_ids
             )
 

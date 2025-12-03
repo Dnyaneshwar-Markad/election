@@ -8,7 +8,7 @@ def go_to(page):
 
 def get_connection():
     return psycopg.connect(
-        host="ep-young-wind-a1u94kzn-pooler.ap-southeast-1.aws.neon.tech",
+        host="ep-royal-smoke-a1gha9pb-pooler.ap-southeast-1.aws.neon.tech",
         dbname="neondb",        # ⭐ FIXED: psycopg3 uses dbname, not database
         user="neondb_owner",
         password="npg_rs1bVogh7EtU",

@@ -8,10 +8,10 @@ def go_to(page):
 
 def get_connection():
     return psycopg.connect(
-        host="dpg-d4ju0ji4d50c73d4mndg-a.oregon-postgres.render.com",
-        dbname="dnyaneshwar",        # ⭐ FIXED: psycopg3 uses dbname, not database
-        user="dnyaneshwar_user",
-        password="83DePVbb07mAGJRvlAsbfA1LygFOBt2q",
+        host="ep-young-wind-a1u94kzn-pooler.ap-southeast-1.aws.neon.tech",
+        dbname="neondb",        # ⭐ FIXED: psycopg3 uses dbname, not database
+        user="neondb_owner",
+        password="npg_rs1bVogh7EtU",
         port="5432"
     )
 

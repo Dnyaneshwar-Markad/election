@@ -171,7 +171,7 @@ def survey_page():
             # Mark visited in VoterList
             placeholder = ",".join(["%s"] * len(selected_family_ids))
             cursor.execute(
-                f"""UPDATE "VoterList" SET "Visited" = %r WHERE "VoterID" IN ({placeholder})""",
+                f"""UPDATE "VoterList" SET "Visited" = %b WHERE "VoterID" IN ({placeholder})""",
                 [visited_value] + selected_family_ids
             )
 

@@ -1249,8 +1249,8 @@ def dashboard_page():
             if st.button("यादी तयार करा - Male"):
                 filtered_male = df_v[df_v["Sex"].isin(["M", "Male"])]
                 images = []
-                for start in range(0, len(filtered_male), 30):
-                    chunk = filtered_male.iloc[start : start + 30]
+                for start in range(0, len(filtered_m), 30):
+                    chunk = filtered_m.iloc[start : start + 30]
                     images.append(dataframe_to_image(chunk))
                 pdf_file = images_to_pdf(images)
                 st.download_button(label="📄 Download Male Voter List", data=pdf_file, file_name="Male_Filtered_List.pdf", mime="application/pdf")
@@ -1288,7 +1288,7 @@ def dashboard_page():
                 age_f = (min_age, max_age)
                 st.info(f"All voters are age {min_age}.")
             else:
-                age_f = st.slider("वयानुसार शोध", min_value=min_age_all, max_value=max_age_all, value=(min_age_all, max_age_all), key="age_female")
+                age_f = st.slider("वयानुसार शोध", min_value=min_age, max_value=max_age, value=(min_age, max_age), key="age_female")
 
             filtered_f = df_v[df_v["Sex"].isin(["F", "Female"])].copy()
             filtered_f = filtered_f[(filtered_f["Age"] >= age_f[0]) & (filtered_f["Age"] <= age_f[1])]
@@ -1301,8 +1301,8 @@ def dashboard_page():
             if st.button("यादी तयार करा - Female"):
                 filtered_female = df_v[df_v["Sex"].isin(["F", "Female"])]
                 images = []
-                for start in range(0, len(filtered_female), 30):
-                    chunk = filtered_female.iloc[start : start + 30]
+                for start in range(0, len(filtered_f), 30):
+                    chunk = filtered_f.iloc[start : start + 30]
                     images.append(dataframe_to_image(chunk))
                 pdf_file = images_to_pdf(images)
                 st.download_button(label="📄 Download Female Voter List", data=pdf_file, file_name="Female_Filtered_List.pdf", mime="application/pdf")

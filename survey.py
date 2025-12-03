@@ -1,6 +1,6 @@
 import streamlit as st
-import psycopg2
-import psycopg2.extras
+import psycopg
+from psycopg.rows import dict_row
 from router import get_connection
 
 
@@ -17,7 +17,7 @@ def survey_page():
     st.subheader("📋 सर्वेक्षण फॉर्म")
 
     conn = get_connection()
-    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cursor = conn.cursor(row_factory=dict_row)
 
     # -----------------------------------------------------
     # SEARCH BAR
@@ -138,7 +138,7 @@ def survey_page():
         right.number_input("स्त्री", value=female_count, disabled=True, key=f"f_{V}")
         address = st.text_area("पत्ता", value=address_autofill, disabled=True, key=f"addr_{V}")
 
-    visited = st.radio("Visited?", ("Yes", "No"), key=f"visited_{V}")
+    visited = st.radio("Visited?", ("Yes"), key=f"visited_{V}")
     visited_value = 1 if visited == "Yes" else 0
 
     # -----------------------------------------------------
@@ -171,7 +171,7 @@ def survey_page():
             # Mark visited in VoterList
             placeholder = ",".join(["%s"] * len(selected_family_ids))
             cursor.execute(
-                f"""UPDATE "VoterList" SET "Visited" = %s WHERE "VoterID" IN ({placeholder})""",
+                f"""UPDATE "VoterList" SET "Visited" = %r WHERE "VoterID" IN ({placeholder})""",
                 [visited_value] + selected_family_ids
             )
 

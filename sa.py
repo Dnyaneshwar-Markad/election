@@ -13,93 +13,82 @@ from reportlab.lib import colors
 from dashboard import dashboard_page
 from survey import survey_page
 from router import get_connection
+import streamlit as st
 import os
-import psycopg2
-import psycopg2.extras
+import psycopg
+from psycopg.rows import dict_row
 from types import SimpleNamespace
 
 # ------------------- APP CONFIG -------------------
-st.set_page_config(page_title="Election Management Software", page_icon="favicon.png", layout="wide")
+st.set_page_config(page_title="Election Management Software",
+                   page_icon="favicon.png", layout="wide")
+
 
 # ------------------- Helpers -------------------
 def dict_row_to_namespace(d: dict):
-    """
-    Convert a dict returned by RealDictCursor to a SimpleNamespace
-    and add common alias attributes for compatibility (UserID <-> UserId, Username <-> UserName, ParentID <-> ParentId).
-    """
+    """Convert dict from psycopg (dict_row) to SimpleNamespace with alias fields."""
     if d is None:
         return None
-    # normalize keys to exact-case map (keep original keys too)
+
     ns = SimpleNamespace(**d)
-    # add aliases for user table differences
-    # only if related keys exist
-    if "UserID" in d and not hasattr(ns, "UserId"):
-        setattr(ns, "UserId", d.get("UserID"))
-    if "UserId" in d and not hasattr(ns, "UserID"):
-        setattr(ns, "UserID", d.get("UserId"))
-    if "Username" in d and not hasattr(ns, "UserName"):
-        setattr(ns, "UserName", d.get("Username"))
-    if "UserName" in d and not hasattr(ns, "Username"):
-        setattr(ns, "Username", d.get("UserName"))
-    if "ParentID" in d and not hasattr(ns, "ParentId"):
-        setattr(ns, "ParentId", d.get("ParentID"))
-    if "ParentId" in d and not hasattr(ns, "ParentID"):
-        setattr(ns, "ParentID", d.get("ParentId"))
+
+    # Aliases for compatibility
+    alias_map = {
+        "UserID": "UserId",
+        "UserId": "UserID",
+        "Username": "UserName",
+        "UserName": "Username",
+        "ParentID": "ParentId",
+        "ParentId": "ParentID"
+    }
+
+    for original, alias in alias_map.items():
+        if original in d and not hasattr(ns, alias):
+            setattr(ns, alias, d.get(original))
+
     return ns
 
-def fetchall_as_ns(cursor):
-    """Fetch all rows from a RealDictCursor and convert to SimpleNamespace objects (attribute access)."""
-    rows = cursor.fetchall()
-    return [dict_row_to_namespace(r) for r in rows]
 
-def fetchone_as_ns(cursor):
-    r = cursor.fetchone()
-    return dict_row_to_namespace(r) if r else None
-
-# ------------------- FETCH VOTERS (returns list of SimpleNamespace rows) -------------------
+# ------------------- FETCH VOTERS -------------------
 def fetch_voters():
-    conn = None
     try:
-        conn = get_connection()
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute("""
-            SELECT "VEName", "HouseNo", "VPSName", "EName", "PSName", "VAddress", "SectionNo", "Sex", "Age", "IDCardNo"
-            FROM "VoterList"
-        """)
-        rows = fetchall_as_ns(cursor)
-        return rows
-    finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            conn.close()
+        with get_connection() as conn:
+            # psycopg3 method → row_factory=dict_row
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute("""
+                    SELECT "VEName", "HouseNo", "VPSName", "EName",
+                           "PSName", "VAddress", "SectionNo", "Sex",
+                           "Age", "IDCardNo"
+                    FROM "VoterList"
+                """)
+
+                rows = cur.fetchall()  # already list of dicts
+                return [dict_row_to_namespace(r) for r in rows]
+
+    except Exception as e:
+        st.error(f"❌ DB Error: {e}")
+        return []
+
 
 # ------------------- VALIDATE USER -------------------
 def validate_user(username, password):
-    """
-    Returns a SimpleNamespace with user attributes (or None).
-    Provides alias attributes so calling code can use user.UserId or user.UserID etc.
-    """
-    conn = None
     try:
-        conn = get_connection()
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute("""
-            SELECT "UserID", "Username", "Password", "Role", "ParentID", "CreatedAt"
-            FROM "User"
-            WHERE "Username" = %s AND "Password" = %s
-            LIMIT 1
-        """, (username, password))
-        user = fetchone_as_ns(cursor)
-        return user
+        with get_connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute("""
+                    SELECT "UserID", "Username", "Password", "Role",
+                           "ParentID", "CreatedAt"
+                    FROM "User"
+                    WHERE "Username" = %s AND "Password" = %s
+                    LIMIT 1
+                """, (username, password))
+
+                result = cur.fetchone()
+                return dict_row_to_namespace(result) if result else None
+
     except Exception as e:
         st.error(f"❌ DB Error: {e}")
         return None
-    finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            conn.close()
 
 # ------------------- BACKGROUND IMAGE -------------------
 def add_bg_from_local(image_file):

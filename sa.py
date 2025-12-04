@@ -23,7 +23,6 @@ from types import SimpleNamespace
 st.set_page_config(page_title="Election Management Software",
                    page_icon="favicon.png", layout="wide")
 
-
 # ------------------- Helpers -------------------
 def dict_row_to_namespace(d: dict):
     """Convert dict from psycopg (dict_row) to SimpleNamespace with alias fields."""
@@ -49,6 +48,27 @@ def dict_row_to_namespace(d: dict):
     return ns
 
 
+
+
+# ------------------- VALIDATE USER -------------------
+def validate_user(username, password):
+    try:
+        with get_connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute("""
+                    SELECT "UserID", "Username", "Password", "Role",
+                        "ParentID", "CreatedAt"
+                    FROM "User"
+                    WHERE "Username" = %s AND "Password" = %s
+                """, (username, password))
+
+                result = cur.fetchone()
+                return dict_row_to_namespace(result) if result else None
+
+    except Exception as e:
+        st.error(f"❌ DB Error: {e}")
+        return None
+
 # ------------------- FETCH VOTERS -------------------
 def fetch_voters():
     try:
@@ -70,25 +90,6 @@ def fetch_voters():
         return []
 
 
-# ------------------- VALIDATE USER -------------------
-def validate_user(username, password):
-    try:
-        with get_connection() as conn:
-            with conn.cursor(row_factory=dict_row) as cur:
-                cur.execute("""
-                    SELECT "UserID", "Username", "Password", "Role",
-                           "ParentID", "CreatedAt"
-                    FROM "User"
-                    WHERE "Username" = %s AND "Password" = %s
-                    LIMIT 1
-                """, (username, password))
-
-                result = cur.fetchone()
-                return dict_row_to_namespace(result) if result else None
-
-    except Exception as e:
-        st.error(f"❌ DB Error: {e}")
-        return None
 
 # ------------------- BACKGROUND IMAGE -------------------
 def add_bg_from_local(image_file):

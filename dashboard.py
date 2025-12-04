@@ -316,12 +316,9 @@ from reportlab.pdfbase.ttfonts import TTFont
 import io
 import textwrap
 from PyPDF2 import PdfReader, PdfWriter
-from router import get_connection
+from router import get_connection 
 import os
     
-
-
-
 
 # Load Data
 @st.cache_data
@@ -340,7 +337,6 @@ def load_survey_data():
         SELECT "SurveyNo","VoterID","VEName","Sex","HouseNo","Landmark","VAddress", "Mobile","PartNo","SectionNo","VotersCount","Male", "Female","Caste","Submission_Time","Age" FROM "SurveyData"
     """
     return pd.read_sql(query, conn)
-
 # Convert DataFrame CHUNK (30 rows) → Image (Scan Style)
 def dataframe_to_image(df_chunk):
     """

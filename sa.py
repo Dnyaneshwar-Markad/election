@@ -284,25 +284,43 @@ if "role" not in st.session_state:
 def go_to(page):
     st.session_state.page = page
 
-
 # ------------------- LOGIN PAGE -------------------
 if st.session_state.page == "login" and not st.session_state.logged_in:
     add_bg_from_local("Election.png")
     st.markdown('<div class="main-title">🔐 Election Management Software</div>', unsafe_allow_html=True)
+
     col1, col2, col3 = st.columns(3)
     with col2:
         username = st.text_input("👤 Username")
         password = st.text_input("🔑 Password", type="password")
 
         if st.button("Login"):
+
             user = validate_user(username, password)
+
             if user:
-                st.session_state.logged_in = True
                 st.success("✅ Login Successful!")
+
+                # --- FIX: safe attribute reading ---
+                user_id = getattr(user, "UserId", getattr(user, "UserID", None))
+                role = getattr(user, "Role", None)
+                parent_id = getattr(user, "ParentID", None)
+
+                # -------------- NEW LOGIC --------------
+                # If ParentUserID is NULL → Admin
+                # If ParentUserID has value → Sub-user belonging to an admin
+                if parent_id in (None, 0, "0", ""):
+                    main_admin_id = user_id     # Admin
+                else:
+                    main_admin_id = parent_id    # Sub-user linked to Admin
+                # --------------------------------------
+                # Save session data
+                st.session_state.logged_in = True
                 st.session_state.page = "dashboard"
-                # provide both attribute spellings for compatibility
-                st.session_state.user_id = getattr(user, "UserId", getattr(user, "UserID", None))
-                st.session_state.role = getattr(user, "Role", None)
+                st.session_state.user_id = user_id
+                st.session_state.role = role
+                st.session_state.main_admin_id = main_admin_id   # <-- THE IMPORTANT PART
+
                 st.rerun()
             else:
                 st.error("❌ Invalid Username or Password")
@@ -343,6 +361,7 @@ elif st.session_state.logged_in:
             st.session_state.page = "login"
             st.session_state.user_id = None
             st.session_state.role = None
+            st.cache_data.clear()
             st.rerun()
 
     # --------------- LOAD THE DEFAULT PAGE ----------------
@@ -608,14 +627,14 @@ elif st.session_state.logged_in:
 
             try:
                 conn = get_connection()
-                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cursor = conn.cursor(row_factory=dict_row)
                 cursor.execute("""
                     SELECT "UserID", "Username", "Role", "CreatedAt"
                     FROM "User"
                     WHERE "ParentID" = %s
                     ORDER BY "CreatedAt" DESC
                 """, (st.session_state.user_id,))
-                rows = fetchall_as_ns(cursor)
+                rows = [dict_row_to_namespace(row) for row in cursor.fetchall()]
                 if rows:
                     for r in rows:
                         st.markdown(f"""

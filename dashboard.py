@@ -324,18 +324,34 @@ import os
 @st.cache_data
 def load_voter_data():
     conn = get_connection()
-    query = """
-        SELECT "VoterID", "PartNo", "SectionNo", "EName", "VEName", "Sex", "Age","Address", "VAddress", "Visited"
+    main_admin_id = st.session_state.get("main_admin_id")
+    visited_col = f"Visited_{main_admin_id}"
+
+    query = f'''
+        SELECT 
+            "VoterID", 
+            "PartNo",
+            "SectionNo",
+            "EName",
+            "VEName",
+            "Sex",
+            "Age",
+            "Address",
+            "VAddress",
+            "{visited_col}" AS "Visited"
         FROM "VoterList"
-    """
+    '''
+
     return pd.read_sql(query, conn)
 
 @st.cache_data
 def load_survey_data():
     conn = get_connection()
-    query = """
-        SELECT "SurveyNo","VoterID","VEName","Sex","HouseNo","Landmark","VAddress", "Mobile","PartNo","SectionNo","VotersCount","Male", "Female","Caste","Submission_Time","Age" FROM "SurveyData"
-    """
+    query = f'''
+    SELECT "SurveyNo","VoterID","VEName","Sex","HouseNo","Landmark","VAddress", "Mobile","PartNo","SectionNo","VotersCount","Male", "Female","Caste","Submission_Time","Age" FROM "SurveyData" WHERE "UserID" = {st.session_state.get("main_admin_id")}
+    '''
+        
+    
     return pd.read_sql(query, conn)
 # Convert DataFrame CHUNK (30 rows) → Image (Scan Style)
 def dataframe_to_image(df_chunk):
@@ -983,6 +999,12 @@ def images_to_pdf(images):
 #             st.plotly_chart(fig_survey, use_container_width=True)
 
 def dashboard_page():
+    # ---- ensure main_admin_id is available ----
+    main_admin_id = st.session_state.get("main_admin_id")
+    if main_admin_id is None:
+        st.error("❌ No admin context found. Please login again.")
+        return
+    visited_col = f"Visited_{main_admin_id}"
     # ---- Layout: top controls + load data ----
     colA, colB = st.columns([1, 1])
 
@@ -1016,24 +1038,41 @@ def dashboard_page():
         )
 
     # ---- Derived columns and working copies ----
+    # if the dynamic visited column exists, map it to a common "Visited" column
+    if visited_col in df_voters_all.columns:
+        # convert to numeric safe (handles booleans, ints, strings)
+        df_voters_all["Visited"] = pd.to_numeric(df_voters_all[visited_col], errors="coerce").fillna(0).astype(int)
+    elif "Visited" in df_voters_all.columns:
+        # ensure type is int
+        df_voters_all["Visited"] = pd.to_numeric(df_voters_all["Visited"], errors="coerce").fillna(0).astype(int)
+    else:
+        # column absent — create default (0)
+        df_voters_all["Visited"] = 0
+
     # Ensure the expected columns exist and fill NaNs to avoid errors
-    for col in ["Visited", "EName", "Address", "PartNo", "Age", "Sex", "VAddress", "VoterID"]:
+    for col in ["EName", "Address", "PartNo", "Age", "Sex", "VAddress", "VoterID"]:
         if col not in df_voters_all.columns:
             df_voters_all[col] = None
 
     # Create a display label preserving visited mark
-    df_voters_all["FullLabel"] = df_voters_all.apply(
-        lambda row: ("✅ " if int(row["Visited"]) == 1 else "") + f"{row['EName']} — {row['Address']}"
-        if pd.notna(row["EName"]) else "",
-        axis=1,
-    )
+    def _full_label(row):
+        try:
+            visited_flag = int(row.get("Visited", 0))
+        except Exception:
+            visited_flag = 0
+        name = row.get("EName") or ""
+        addr = row.get("Address") or ""
+        prefix = "✅ " if visited_flag == 1 else ""
+        return f"{prefix}{name} — {addr}" if name else ""
+
+    df_voters_all["FullLabel"] = df_voters_all.apply(_full_label, axis=1)
 
     df_v = df_voters_all.copy()
 
     # ---- Primary search filter ----
     if global_search and global_search.strip():
         kw = global_search.strip().lower()
-        df_v = df_v[df_v["EName"].str.lower().str.contains(kw, na=False)]
+        df_v = df_v[df_v["EName"].fillna("").str.lower().str.contains(kw, na=False)]
 
     # ---- Voter picker (multiselect) ----
     voter_picker = st.multiselect(
@@ -1080,7 +1119,7 @@ def dashboard_page():
     with col2:
         st.markdown("<h3 style='text-align:center; color:#b39334'>Male</h3>", unsafe_allow_html=True)
         males = df_v[df_v["Sex"].isin(["M", "Male"])]
-        visited_males = males[males["Visited"] == 1].shape[0]
+        visited_males =  int(pd.to_numeric(males["Visited"], errors="coerce").fillna(0).sum())  
         not_visited_males = max(0, males.shape[0] - visited_males)
         male_df = pd.DataFrame({"Status": ["Visited", "Not Visited"], "Count": [visited_males, not_visited_males]})
 
@@ -1100,7 +1139,7 @@ def dashboard_page():
     with col3:
         st.markdown("<h3 style='text-align:center; color:#b39334'>Female</h3>", unsafe_allow_html=True)
         females = df_v[df_v["Sex"].isin(["F", "Female"])]
-        visited_females = females[females["Visited"] == 1].shape[0]
+        visited_females = int(pd.to_numeric(females["Visited"], errors="coerce").fillna(0).sum())
         not_visited_females = max(0, females.shape[0] - visited_females)
         female_df = pd.DataFrame({"Status": ["Visited", "Not Visited"], "Count": [visited_females, not_visited_females]})
 

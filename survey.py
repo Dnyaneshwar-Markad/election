@@ -5,6 +5,7 @@ from router import get_connection
 
 
 def survey_page():
+    main_admin_id = st.session_state.get("main_admin_id")
 
     # -----------------------------------------------------
     # VERSION RESETTER (FOR CLEARING WIDGETS)
@@ -159,25 +160,29 @@ def survey_page():
             cursor.execute("""
                 INSERT INTO "SurveyData"
                 ("VoterID", "VEName", "HouseNo", "Landmark", "VAddress", "Mobile",
-                 "SectionNo", "VotersCount", "Male", "Female", "Caste",
-                 "Sex", "PartNo", "Age")
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                "SectionNo", "VotersCount", "Male", "Female", "Caste",
+                "Sex", "PartNo", "Age","UserID")
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 family_head_id, head_choice, house_number, landmark, address_autofill,
                 mobile, section_no, total_voters, male_count, female_count,
-                caste, head_sex, head_part, head_age
+                caste, head_sex, head_part, head_age,main_admin_id
             ))
 
             # Mark visited in VoterList
-            placeholder = ",".join(["%s"] * len(selected_family_ids))
+            main_admin_id = st.session_state.get("main_admin_id")
+            visited_col = f'Visited_{main_admin_id}'
+
             cursor.execute(
-                f"""UPDATE "VoterList" SET "Visited" = %s WHERE "VoterID" IN ({placeholder})""",
+                f'''UPDATE "VoterList"
+                    SET "{visited_col}" = %s
+                    WHERE "VoterID" IN ({placeholder})''',
                 [visited_value] + selected_family_ids
             )
 
             conn.commit()
             st.success("✅ सर्वेक्षण फॉर्म सबमिट झाला!")
-
+            
             # Reset UI
             st.session_state.widget_version += 1
             st.rerun()

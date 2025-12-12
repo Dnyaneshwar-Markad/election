@@ -4,6 +4,7 @@ plotly
 reportlab
 PyPDF2
 Pillow
+st_aggrid
 psycopg[binary]
 fastapi
 uvicorn[standard]

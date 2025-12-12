@@ -1,3 +1,9 @@
+streamlit
+pandas
+plotly
+reportlab
+PyPDF2
+Pillow
 psycopg[binary]
 fastapi
 uvicorn[standard]

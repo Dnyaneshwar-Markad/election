@@ -1450,22 +1450,65 @@ elif st.session_state.logged_in:
             display_columns_list = [col for col in ['VoterID', 'VEName', 'SectionNo', 'Sex', 'VAddress', 'Visited'] if col in display_df.columns]
             df_grid_display = display_df[display_columns_list] if display_columns_list else display_df
 
-            # AG Grid for list display
-            gb_list = GridOptionsBuilder.from_dataframe(df_grid_display)
-            gb_list.configure_default_column(resizable=True, sortable=True, filter=True)
-            gb_list.configure_selection(selection_mode="single", use_checkbox=False)
-            gb_list.configure_side_bar()
-            gb_list.configure_pagination(enabled=True, paginationPageSize=min(50, list_page_size))
-            grid_opts_list = gb_list.build()
+            st.markdown("### 🗂️ मतदार सूची")
 
-            list_grid_response = AgGrid(
-                df_grid_display,
-                gridOptions=grid_opts_list,
-                data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
-                update_mode=GridUpdateMode.NO_UPDATE,
-                allow_unsafe_jscode=True,
-                height=550
-            )
+
+            # ---- SHOW RESULT COUNT ----
+            st.info(f"🔎 सापडलेले मतदार ({len(display_df)} rows — total: {total_estimate_list})")
+
+            # ---- LOOP AND DISPLAY AS CARDS ----
+            for idx, row in display_df.iterrows():
+
+                voter_name = row.get("VEName", "N/A")
+                address = row.get("VAddress", "N/A")
+                house_no = row.get("HouseNo", "NA")
+                age = row.get("Age", "NA")
+                sex = row.get("Sex", "NA")
+
+                colA, colB = st.columns([0.15, 0.85])
+
+                with colA:
+                    is_selected = st.checkbox(
+                        "✔",
+                        key=f"chk_{voter_name}_{idx}",
+                    )
+
+                with colB:
+                    st.markdown(
+                        f"""
+                        <div style="
+                            background-color: #b18c25;
+                            padding: 12px;
+                            border-radius: 15px;
+                            margin-bottom: 12px;
+                            display: flex;
+                            align-items: center;
+                        ">
+                            <div style="
+                                width: 60px;
+                                height: 60px;
+                                border-radius: 50%;
+                                border: 4px solid black;
+                                display: flex;
+                                justify-content: center;
+                                align-items: center;
+                                background-color: #e5b73b;
+                                margin-right: 15px;
+                                font-size: 28px;
+                            ">
+                                👤
+                            </div>
+                            <div style="color: white; line-height: 1.4;">
+                                <b style="font-size: 20px;">{voter_name}</b><br>
+                                <span>घर क्रमांक: {house_no}</span><br>
+                                <span>पत्ता: {address}</span><br>
+                                <span>वय: {age} | लिंग: {sex}</span>
+                            </div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
+
 
             # EXPORT TO PDF (uses currently displayed display_df)
             buffer = BytesIO()

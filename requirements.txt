@@ -7,6 +7,6 @@ Pillow
 psycopg[binary]
 fastapi
 uvicorn[standard]
-jose[cryptograpy]
+python-jose[cryptograpy]
 pydantic
 python-multipart

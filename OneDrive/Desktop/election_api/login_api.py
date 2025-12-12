@@ -38,12 +38,14 @@ class LoginResponse(BaseModel):
     username: str
     role: str
     main_admin_id: int
+    section_no: Optional[int] = None
 
 class UserResponse(BaseModel):
     user_id: int
     username: str
     role: str
     main_admin_id: int
+    section_no: Optional[int] = None
 
 
 class SurveyInput(BaseModel):
@@ -235,6 +237,9 @@ def get_voters(search: Optional[str] = None, limit: int = 500, offset: int = 0, 
             # Build WHERE clause and parameters consistently
             where_clauses = ["TRUE"]
             where_params: list = []
+            section_no = current_user.get("section_no")
+            where_clauses.append('"SectionNo" = %s')
+            where_params.append(section_no)
             if search:
                 where_clauses.append('("EName" ILIKE %s OR "VEName" ILIKE %s)')
                 where_params.extend([f"%{search}%", f"%{search}%"])
@@ -314,15 +319,19 @@ def get_voter_summary(current_user = Depends(get_current_user)):
     """
     try:
         main_admin_id = current_user.get("main_admin_id") or current_user.get("user_id")
+        section_no = current_user.get("section_no")
         visited_col = f'Visited_{main_admin_id}'
 
         with get_connection() as conn:
             cur = conn.cursor()
 
             # total
-            cur.execute('SELECT COUNT(*) FROM "VoterList"')
+            if section_no is not None:
+                cur.execute('SELECT COUNT(*) FROM "VoterList" WHERE "SectionNo" = %s', (section_no,))
+            else:
+                cur.execute('SELECT COUNT(*) FROM "VoterList"')
             total = cur.fetchone()[0] or 0
-
+            
             # visited (if column exists)
             cur.execute(
                 """
@@ -334,36 +343,53 @@ def get_voter_summary(current_user = Depends(get_current_user)):
             col_exists = cur.fetchone() is not None
 
             if col_exists:
-                cur.execute(f'SELECT COUNT(*) FROM "VoterList" WHERE "{visited_col}" = TRUE')
+                if section_no is not None:
+                    cur.execute(f'SELECT COUNT(*) FROM "VoterList" WHERE "{visited_col}" = TRUE AND "SectionNo" = %s', (section_no,))
+                else:
+                    cur.execute(f'SELECT COUNT(*) FROM "VoterList" WHERE "{visited_col}" = TRUE')
                 visited = cur.fetchone()[0] or 0
             else:
                 # fallback to generic Visited column if present
-                cur.execute("""
+                cur.execute(
+                    """
                     SELECT column_name FROM information_schema.columns
                     WHERE table_name = %s AND column_name = %s
-                """, ("VoterList", "Visited"))
+                    """,
+                    ("VoterList", "Visited")
+                )
                 if cur.fetchone():
-                    cur.execute('SELECT COUNT(*) FROM "VoterList" WHERE "Visited" = TRUE')
+                    if section_no is not None:
+                        cur.execute('SELECT COUNT(*) FROM "VoterList" WHERE "Visited" = TRUE AND "SectionNo" = %s', (section_no,))
+                    else:
+                        cur.execute('SELECT COUNT(*) FROM "VoterList" WHERE "Visited" = TRUE')
                     visited = cur.fetchone()[0] or 0
                 else:
-                    visited = 0
+                    visited = 0                
 
-            # sex breakdown
-            cur.execute('SELECT "Sex", COUNT(*) FROM "VoterList" GROUP BY "Sex"')
+            # sex breakdown (respect section)
+            if section_no is not None:
+                cur.execute('SELECT "Sex", COUNT(*) FROM "VoterList" WHERE "SectionNo" = %s GROUP BY "Sex"', (section_no,))
+            else:
+                cur.execute('SELECT "Sex", COUNT(*) FROM "VoterList" GROUP BY "Sex"')
             sex_rows = cur.fetchall()
             sex_breakdown = {r[0]: r[1] for r in sex_rows}
-
+            
             # top addresses (by total voters) - include visited/not_visited counts
-            cur.execute(f'''
+            address_sql = f'''
                 SELECT "Address",
                        COUNT(*) AS total,
                        SUM(CASE WHEN "{visited_col}" = TRUE THEN 1 ELSE 0 END) AS visited,
                        SUM(CASE WHEN "{visited_col}" = FALSE THEN 1 ELSE 0 END) AS not_visited
                 FROM "VoterList"
-                GROUP BY "Address"
-                ORDER BY total DESC
-                LIMIT 50
-            ''')
+            '''
+            if section_no is not None:
+                address_sql += ' WHERE "SectionNo" = %s '
+                address_sql += ' GROUP BY "Address" ORDER BY total DESC LIMIT 50'
+                cur.execute(address_sql, (section_no,))
+            else:
+                address_sql += ' GROUP BY "Address" ORDER BY total DESC LIMIT 50'
+                cur.execute(address_sql)
+
             address_rows = cur.fetchall()
             address_chart = []
             for row in address_rows:
@@ -406,6 +432,9 @@ def get_voter_list(
 
         where_clauses = ["TRUE"]
         params: List[Any] = []
+        section_no = current_user.get("section_no")
+        where_clauses.append('"SectionNo" = %s')
+        params.append(section_no)
 
         if search:
             where_clauses.append('("EName" ILIKE %s OR "VEName" ILIKE %s)')
@@ -431,7 +460,7 @@ def get_voter_list(
 
         data_sql = f'''
             SELECT "VoterID","PartNo","SectionNo","EName","VEName","Sex","Age",
-                   "Address","VAddress", "{visited_col}" AS "Visited"
+            "Address","VAddress", "{visited_col}" AS "Visited"
             FROM "VoterList"
             WHERE {where_sql}
             ORDER BY "VoterID"
@@ -464,21 +493,7 @@ def get_voters_by_surname(
     limit: int = 500,
     current_user = Depends(get_current_user)
 ):
-    """
-    Get voters grouped by surname.
-    Returns:
-    {
-      total: <total_surnames>,
-      surnames: [
-        {
-          surname: "Patil",
-          members: [
-            {...}, {...}
-          ]
-        }
-      ]
-    }
-    """
+
     try:
         with get_connection() as conn:
             with conn.cursor() as cur:
@@ -487,8 +502,9 @@ def get_voters_by_surname(
                 where_clause = "TRUE"
                 params = []
                 if surname:
-                    where_clause = '"Surname" ILIKE %s'
-                    params.append(f"%{surname}%")
+                    where_clause = '"SectionNo" = %s AND "Surname" ILIKE %s'
+                    params = [current_user.get("section_no"), f"%{surname}%"]
+
 
                 # Fetch rows ordered by surname for grouping
                 sql = f'''
@@ -552,16 +568,27 @@ def get_voter_filters(current_user = Depends(get_current_user)):
     Lightweight endpoints that avoid loading entire voter list.
     """
     try:
+        section_no = current_user.get("section_no")
         with get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute('SELECT DISTINCT "Address" FROM "VoterList"')
+                if section_no is not None:
+                    cur.execute('SELECT DISTINCT "Address" FROM "VoterList" WHERE "SectionNo" = %s', (section_no,))
+                else:
+                    cur.execute('SELECT DISTINCT "Address" FROM "VoterList"')
                 addresses = [r[0] for r in cur.fetchall() if r[0] is not None]
 
-                cur.execute('SELECT DISTINCT "PartNo" FROM "VoterList"')
+                if section_no is not None:
+                    cur.execute('SELECT DISTINCT "PartNo" FROM "VoterList" WHERE "SectionNo" = %s', (section_no,))
+                else:
+                    cur.execute('SELECT DISTINCT "PartNo" FROM "VoterList"')
                 parts = [r[0] for r in cur.fetchall() if r[0] is not None]
 
-                cur.execute('SELECT MIN("Age"), MAX("Age") FROM "VoterList"')
+                if section_no is not None:
+                    cur.execute('SELECT MIN("Age"), MAX("Age") FROM "VoterList" WHERE "SectionNo" = %s', (section_no,))
+                else:
+                    cur.execute('SELECT MIN("Age"), MAX("Age") FROM "VoterList"')
                 min_age, max_age = cur.fetchone()
+
 
         return {
             "address_list": sorted(addresses),
@@ -585,13 +612,15 @@ def submit_survey(request: SurveySubmissionRequest, current_user = Depends(get_c
     """
     try:
         main_admin_id = request.main_admin_id or current_user.get("main_admin_id") or current_user.get("user_id")
+        section_no = current_user.get("section_no")
+        
 
         with get_connection() as conn:
             with conn.cursor() as cur:
                 # Fetch family head details
                 cur.execute("""
                     SELECT "EName", "VEName", "SectionNo", "Sex", "Age", 
-                           "VAddress", "PartNo"
+                    "VAddress", "PartNo"
                     FROM "VoterList"
                     WHERE "VoterID" = %s
                 """, (request.family_head_id,))
@@ -601,6 +630,8 @@ def submit_survey(request: SurveySubmissionRequest, current_user = Depends(get_c
                     raise HTTPException(status_code=404, detail="Family head not found")
                 
                 head = dict(zip([d[0] for d in cur.description], head_row))
+                if section_no is not None and head.get("SectionNo") != section_no:
+                    raise HTTPException(status_code=403, detail="Family head does not belong to your Section")
                 
                 # Get family member counts (only if ids provided)
                 if request.selected_family_ids:

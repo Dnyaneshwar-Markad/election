@@ -26,7 +26,7 @@ st.set_page_config(layout="wide", page_title="Voter Dashboard (API)")
 
 # ---------- Helper: API factory ----------
 def get_api_client() -> APIClient:
-    base = os.getenv("API_URL", "http://127.0.0.1:8000")
+    base = os.getenv("API_URL", "https://election-are-near-backend.onrender.com")
     token = st.session_state.get("access_token") or st.session_state.get("token")
     return APIClient(base_url=base, token=token)
 

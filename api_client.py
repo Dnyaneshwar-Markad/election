@@ -4,7 +4,7 @@ import os
 
 class APIClient:
     def __init__(self, base_url=None, token=None):
-        self.base_url = base_url or os.getenv("API_URL", "http://127.0.0.1:8000")
+        self.base_url = base_url or os.getenv("API_URL", "https://election-are-near-backend.onrender.com")
         self.token = token
 
     # ---------- LOGIN ----------

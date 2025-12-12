@@ -770,7 +770,7 @@ def dict_row_to_namespace(d: dict):
 # (DB-based validate_user removed — use API login endpoint instead)
 def get_api_client():
     """Return an APIClient configured with base URL and session token from Streamlit state."""
-    base = os.getenv("API_URL", "http://127.0.0.1:8000")
+    base = os.getenv("API_URL", "https://election-are-near-backend.onrender.com")
     token = st.session_state.get("access_token") or st.session_state.get("token")
     return APIClient(base_url=base, token=token)
 
@@ -1092,7 +1092,7 @@ if st.session_state.page == "login" and not st.session_state.logged_in:
         if st.button("Login"):
             try:
                 # USE API FOR LOGIN
-                api_client = APIClient(base_url=os.getenv("API_URL", "http://127.0.0.1:8000"))
+                api_client = APIClient(base_url=os.getenv("API_URL", "https://election-are-near-backend.onrender.com"))
                 result = api_client.login(username, password)
                 
                 if result:

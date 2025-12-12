@@ -735,8 +735,6 @@ import os
 from types import SimpleNamespace
 import requests
 
-# NEW: AgGrid imports
-from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, DataReturnMode
 
 # ------------------- APP CONFIG -------------------
 st.set_page_config(page_title="Election Management Software",

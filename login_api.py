@@ -799,150 +799,150 @@ def get_voters_data(
         raise HTTPException(status_code=500, detail=str(e))
 
 # # -------------------- SUBMIT SURVEY (kept logic but hardened) --------------------
-# @app.post("/submit-survey", response_model=SurveySubmissionResponse)
-# def submit_survey(
-#     request: SurveySubmissionRequest,
-#     current_user = Depends(get_current_user)
-# ):
-#     """Submit survey form data and mark voters as visited."""
-#     try:
-#         main_admin_id = (
-#             request.main_admin_id
-#             or current_user.get("main_admin_id")
-#             or current_user.get("user_id")
-#         )
-#         section_no = current_user.get("section_no")
+@app.post("/submit-survey", response_model=SurveySubmissionResponse)
+def submit_survey(
+    request: SurveySubmissionRequest,
+    current_user = Depends(get_current_user)
+):
+    """Submit survey form data and mark voters as visited."""
+    try:
+        main_admin_id = (
+            request.main_admin_id
+            or current_user.get("main_admin_id")
+            or current_user.get("user_id")
+        )
+        section_no = current_user.get("section_no")
 
-#         with get_connection() as conn:
-#             with conn.cursor() as cur:
+        with get_connection() as conn:
+            with conn.cursor() as cur:
 
-#                 # ------------------ FAMILY HEAD ------------------
-#                 cur.execute("""
-#                     SELECT "EName", "VEName", "SectionNo", "Sex", "Age",
-#                            "VAddress", "PartNo"
-#                     FROM "VoterList"
-#                     WHERE "VoterID" = %s
-#                 """, (request.family_head_id,))
+                # ------------------ FAMILY HEAD ------------------
+                cur.execute("""
+                    SELECT "EName", "VEName", "SectionNo", "Sex", "Age",
+                           "VAddress", "PartNo"
+                    FROM "VoterList"
+                    WHERE "VoterID" = %s
+                """, (request.family_head_id,))
 
-#                 head_row = cur.fetchone()
-#                 if not head_row:
-#                     raise HTTPException(
-#                         status_code=404,
-#                         detail="Family head not found"
-#                     )
+                head_row = cur.fetchone()
+                if not head_row:
+                    raise HTTPException(
+                        status_code=404,
+                        detail="Family head not found"
+                    )
 
-#                 head = dict(zip([d[0] for d in cur.description], head_row))
+                head = dict(zip([d[0] for d in cur.description], head_row))
 
-#                 if section_no is not None and head["SectionNo"] != section_no:
-#                     raise HTTPException(
-#                         status_code=403,
-#                         detail="Family head does not belong to your Section"
-#                     )
+                if section_no is not None and head["SectionNo"] != section_no:
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Family head does not belong to your Section"
+                    )
 
-#                 # ------------------ FAMILY COUNTS ------------------
-#                 if request.selected_family_ids:
-#                     placeholders = ",".join(["%s"] * len(request.selected_family_ids))
-#                     cur.execute(
-#                         f'''
-#                         SELECT "Sex"
-#                         FROM "VoterList"
-#                         WHERE "VoterID" IN ({placeholders})
-#                         ''',
-#                         request.selected_family_ids
-#                     )
-#                     fam_rows = cur.fetchall()
-#                     family_members = [
-#                         dict(zip([d[0] for d in cur.description], r))
-#                         for r in fam_rows
-#                     ]
+                # ------------------ FAMILY COUNTS ------------------
+                if request.selected_family_ids:
+                    placeholders = ",".join(["%s"] * len(request.selected_family_ids))
+                    cur.execute(
+                        f'''
+                        SELECT "Sex"
+                        FROM "VoterList"
+                        WHERE "VoterID" IN ({placeholders})
+                        ''',
+                        request.selected_family_ids
+                    )
+                    fam_rows = cur.fetchall()
+                    family_members = [
+                        dict(zip([d[0] for d in cur.description], r))
+                        for r in fam_rows
+                    ]
 
-#                     male_count = len(
-#                         [m for m in family_members if m["Sex"] in ("M", "Male")]
-#                     )
-#                     female_count = len(
-#                         [m for m in family_members if m["Sex"] in ("F", "Female")]
-#                     )
-#                     total_voters = len(family_members)
-#                 else:
-#                     male_count = female_count = total_voters = 0
+                    male_count = len(
+                        [m for m in family_members if m["Sex"] in ("M", "Male")]
+                    )
+                    female_count = len(
+                        [m for m in family_members if m["Sex"] in ("F", "Female")]
+                    )
+                    total_voters = len(family_members)
+                else:
+                    male_count = female_count = total_voters = 0
 
-#                 # ------------------ SURVEY INSERT ------------------
-#                 head_choice = f'{head["EName"]} ({head["VEName"]}) - {request.house_number}'
+                # ------------------ SURVEY INSERT ------------------
+                head_choice = f'{head["EName"]} ({head["VEName"]}) - {request.house_number}'
 
-#                 cur.execute("""
-#                     INSERT INTO "SurveyData"
-#                     ("VoterID", "VEName", "HouseNo", "Landmark", "VAddress",
-#                      "Mobile", "SectionNo", "VotersCount", "Male", "Female",
-#                      "Caste", "Sex", "PartNo", "Age", "UserID")
-#                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-#                     RETURNING "SurveyNo"
-#                 """, (
-#                     request.family_head_id,
-#                     head_choice,
-#                     request.house_number,
-#                     request.landmark,
-#                     head["VAddress"],
-#                     request.mobile,
-#                     head["SectionNo"],
-#                     total_voters,
-#                     male_count,
-#                     female_count,
-#                     request.caste,
-#                     head["Sex"],
-#                     head["PartNo"],
-#                     head["Age"],
-#                     main_admin_id
-#                 ))
+                cur.execute("""
+                    INSERT INTO "SurveyData"
+                    ("VoterID", "VEName", "HouseNo", "Landmark", "VAddress",
+                     "Mobile", "SectionNo", "VotersCount", "Male", "Female",
+                     "Caste", "Sex", "PartNo", "Age", "UserID")
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING "SurveyNo"
+                """, (
+                    request.family_head_id,
+                    head_choice,
+                    request.house_number,
+                    request.landmark,
+                    head["VAddress"],
+                    request.mobile,
+                    head["SectionNo"],
+                    total_voters,
+                    male_count,
+                    female_count,
+                    request.caste,
+                    head["Sex"],
+                    head["PartNo"],
+                    head["Age"],
+                    main_admin_id
+                ))
 
-#                 survey_id = cur.fetchone()[0]
+                survey_id = cur.fetchone()[0]
 
-#                 # ------------------ VISITED UPDATE (FIXED) ------------------
-#                 if request.selected_family_ids:
-#                     visited_col = f'Visited_{main_admin_id}'
+                # ------------------ VISITED UPDATE (FIXED) ------------------
+                if request.selected_family_ids:
+                    visited_col = f'Visited_{main_admin_id}'
 
-#                     # Check if admin-specific column exists
-#                     cur.execute(
-#                         """
-#                         SELECT 1
-#                         FROM information_schema.columns
-#                         WHERE table_name = %s
-#                         AND column_name = %s
-#                         """,
-#                         ("VoterList", visited_col)
-#                     )
+                    # Check if admin-specific column exists
+                    cur.execute(
+                        """
+                        SELECT 1
+                        FROM information_schema.columns
+                        WHERE table_name = %s
+                        AND column_name = %s
+                        """,
+                        ("VoterList", visited_col)
+                    )
 
-#                     # 🔥 FALLBACK FOR ADMINS WITHOUT SUB-USERS
-#                     if cur.fetchone() is None:
-#                         visited_col = "Visited"
+                    # 🔥 FALLBACK FOR ADMINS WITHOUT SUB-USERS
+                    if cur.fetchone() is None:
+                        visited_col = "Visited"
 
-#                     placeholders = ",".join(["%s"] * len(request.selected_family_ids))
+                    placeholders = ",".join(["%s"] * len(request.selected_family_ids))
 
-#                     query = f'''
-#                         UPDATE "VoterList"
-#                         SET "{visited_col}" = %s::boolean
-#                         WHERE "VoterID" IN ({placeholders})
-#                     '''
+                    query = f'''
+                        UPDATE "VoterList"
+                        SET "{visited_col}" = %s::boolean
+                        WHERE "VoterID" IN ({placeholders})
+                    '''
 
-#                     cur.execute(
-#                         query,
-#                         [bool(request.visited)] + request.selected_family_ids
-#                     )
+                    cur.execute(
+                        query,
+                        [bool(request.visited)] + request.selected_family_ids
+                    )
 
-#                 conn.commit()
+                conn.commit()
 
-#         return SurveySubmissionResponse(
-#             success=True,
-#             message="Survey submitted successfully",
-#             survey_id=survey_id
-#         )
+        return SurveySubmissionResponse(
+            success=True,
+            message="Survey submitted successfully",
+            survey_id=survey_id
+        )
 
-#     except HTTPException:
-#         raise
-#     except Exception as e:
-#         raise HTTPException(
-#             status_code=500,
-#             detail=f"Error submitting survey: {str(e)}"
-#         )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error submitting survey: {str(e)}"
+        )
 
 # @app.post("/submit-survey", response_model=SurveySubmissionResponse)
 # def submit_survey(request: SurveySubmissionRequest, current_user = Depends(get_current_user)):

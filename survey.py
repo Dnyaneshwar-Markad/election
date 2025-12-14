@@ -15,6 +15,7 @@ def get_api_client():
 
 def survey_page():
     main_admin_id = st.session_state.get("main_admin_id")
+    section_no = st.session_state.get("section_no")  # ADD THIS
 
     # VERSION RESETTER (FOR CLEARING WIDGETS)
     if "widget_version" not in st.session_state:
@@ -26,7 +27,7 @@ def survey_page():
 
     # Load all voter data from cache (same as dashboard.py)
     try:
-        df_voters_all = load_voter_data_from_api()
+        df_voters_all = load_voter_data_from_api(section_no=section_no)
     except Exception as e:
         st.error(f"❌ Error loading voter data: {e}")
         return

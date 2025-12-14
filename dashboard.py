@@ -31,8 +31,9 @@ def get_api_client() -> APIClient:
     return APIClient(base_url=base, token=token)
 
 # ------------------- DATA LOADERS (cache) -------------------
-@st.cache_data(show_spinner=False)
-def load_voter_data_from_api():
+# @st.cache_data(show_spinner=False)
+def load_voter_data_from_api(section_no=None):
+    """Load voter data - cached per section"""
     api = get_api_client()
     all_rows = []
     limit = 3000
@@ -44,10 +45,18 @@ def load_voter_data_from_api():
         if len(rows) < limit:
             break
         offset += limit
-    return pd.DataFrame(all_rows)
+    
+    df = pd.DataFrame(all_rows)
+    
+    # Filter by section if provided
+    if section_no is not None and not df.empty and "SectionNo" in df.columns:
+        df = df[df["SectionNo"] == section_no]
+    
+    return df
 
-@st.cache_data(show_spinner=False)
-def load_survey_data_from_api():
+# @st.cache_data(show_spinner=False)
+def load_survey_data_from_api(user_id=None):
+    """Load survey data - cached per user"""
     api = get_api_client()
     all_rows = []
     limit = 1000
@@ -61,13 +70,16 @@ def load_survey_data_from_api():
         offset += limit
     return pd.DataFrame(all_rows)
 
-@st.cache_data(show_spinner=False)
-def load_filters_from_api():
+
+# @st.cache_data(show_spinner=False)
+def load_filters_from_api(section_no=None):
+    """Load filters - cached per section"""
     api = get_api_client()
     return api.get_voter_filters()
 
-@st.cache_data(show_spinner=False)
-def load_summary_from_api():
+# @st.cache_data(show_spinner=False)
+def load_summary_from_api(section_no=None):
+    """Load summary - cached per section"""
     api = get_api_client()
     return api.get_voter_summary()
 
@@ -175,13 +187,15 @@ def dashboard_page():
         return
 
     api = get_api_client()
+    
+    section_no = st.session_state.get("section_no")
 
     # Top controls
     colA, colB = st.columns([1, 1])
 
-    with colA:
-        if st.button("🔄 Refresh "):
-            st.cache_data.clear()
+    # with colA:
+    #     if st.button("🔄 Refresh "):
+    #         st.cache_data.clear()
 
     with colB:
         global_search = st.text_input("", placeholder="Search by Name / Surname...", key="global_search", label_visibility="collapsed")
@@ -189,14 +203,16 @@ def dashboard_page():
     # Load data (from API caches)
     try:
         # Summary used for KPIs
-        summary = load_summary_from_api()
+        summary = load_summary_from_api(section_no=section_no)
     except Exception as e:
         st.error(f"Error fetching summary: {e}")
         return
 
     # Load bulk tables (may be large)
-    df_voters_all = load_voter_data_from_api()
-    df_survey = load_survey_data_from_api()
+    df_voters_all = load_voter_data_from_api(section_no=section_no)
+    # Load surveys WITH USER ID
+    user_id = st.session_state.get("user_id")
+    df_survey = load_survey_data_from_api(user_id=user_id)
 
     # Ensure visited column mapping
     main_admin_id = st.session_state.get("main_admin_id")

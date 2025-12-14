@@ -3,7 +3,7 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from jose import jwt, JWTError
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import psycopg
 from typing import Optional, List, Any, Dict, Tuple
 
@@ -69,14 +69,21 @@ class SurveySubmissionRequest(BaseModel):
     """Request body for submitting survey and marking voters as visited."""
     family_head_id: int
     selected_family_ids: list[int] = []
-    house_number: str = ""
+    house_number: Optional[str] = None
     landmark: Optional[str] = None
     mobile: Optional[str] = None
     caste: Optional[str] = None
     visited: int = 1
     main_admin_id: Optional[int] = None
 
+class CreateSubUserRequest(BaseModel):
+    username: str
+    password: str
 
+class CreateSubUserResponse(BaseModel):
+    success: bool
+    subuser_id: int
+    parent_id: int
 class SurveySubmissionResponse(BaseModel):
     """Response after survey submission."""
     success: bool
@@ -121,15 +128,15 @@ def validate_user(username: str, password: str):
         print(f"Database error: {e}")
         return None
 
-def get_current_user(token: str = Depends(oauth2_scheme)):
-    if token in token_blacklist:
-        raise HTTPException(status_code=401, detail="Logged out token")
+# def get_current_user(token: str = Depends(oauth2_scheme)):
+#     if token in token_blacklist:
+#         raise HTTPException(status_code=401, detail="Logged out token")
 
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        return payload
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+#     try:
+#         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+#         return payload
+#     except JWTError:
+#         raise HTTPException(status_code=401, detail="Invalid token")
     
 
 # ==================== JWT FUNCTIONS ====================
@@ -161,11 +168,7 @@ def root():
 
 @app.post("/login", response_model=LoginResponse)
 def login(form_data: OAuth2PasswordRequestForm = Depends()):
-    """
-    Login endpoint
-    - username: Your username
-    - password: Your password
-    """
+    """Login endpoint"""
     user = validate_user(form_data.username, form_data.password)
     
     if not user:
@@ -173,6 +176,8 @@ def login(form_data: OAuth2PasswordRequestForm = Depends()):
             status_code=401,
             detail="Invalid username or password"
         )
+    # ✅ Debug: Print section number
+    print(f"Login - UserID: {user['user_id']}, Section: {user.get('section_no')}")
     
     # Create JWT token
     token = create_access_token({
@@ -238,37 +243,63 @@ def list_users(parent_id: Optional[int] = None, current_user = Depends(get_curre
         return users
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching users: {str(e)}")
+from datetime import datetime
 
+@app.post("/add-subuser", response_model=CreateSubUserResponse)
+def add_subuser(
+    request: CreateSubUserRequest,
+    current_user=Depends(get_current_user)
+):
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Only admins can create subusers")
 
-@app.post("/users")
-def create_user(username: str, password: str, role: str, parent_id: Optional[int] = None, current_user = Depends(get_current_user)):
-    """Create a new user under the current admin (parent)."""
+    parent_id = current_user["user_id"]
+    section_no = current_user["section_no"]
+    if section_no is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Admin has no section assigned"
+        )
+
     try:
         with get_connection() as conn:
             with conn.cursor() as cur:
-                # Verify current user is admin
-                current_admin = current_user.get("main_admin_id") or current_user.get("user_id")
-                
-                # Check if username already exists
-                cur.execute('SELECT "UserID" FROM "User" WHERE "Username" = %s', (username,))
+
+                cur.execute(
+                    'SELECT 1 FROM "User" WHERE "Username"=%s',
+                    (request.username,)
+                )
                 if cur.fetchone():
                     raise HTTPException(status_code=400, detail="Username already exists")
-                
-                # Insert new user
+
                 cur.execute("""
-                    INSERT INTO "User" ("Username", "Password", "Role", "ParentID", "CreatedAt")
-                    VALUES (%s, %s, %s, %s, NOW())
+                    INSERT INTO "User"
+                    ("Username","Password","Role","ParentID","CreatedAt","SectionNo")
+                    VALUES (%s,%s,'subuser',%s,%s,%s)
                     RETURNING "UserID"
-                """, (username, password, role, parent_id or current_admin))
-                
-                new_user_id = cur.fetchone()[0]
+                """, (
+                    request.username,
+                    request.password,
+                    parent_id,
+                    date.today(),
+                    section_no
+                ))
+
+                user_id = cur.fetchone()[0]
                 conn.commit()
-        
-        return {"success": True, "user_id": new_user_id, "username": username}
+
+        return {
+            "success": True,
+            "subuser_id": user_id,
+            "parent_id": parent_id
+        }
+
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error creating user: {str(e)}")
+        print("ADD SUBUSER ERROR:", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 # -------------------- Data endpoints (for Streamlit client) --------------------
 @app.get("/voters")
@@ -628,268 +659,6 @@ def get_voter_summary(current_user = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# @app.get("/voters-data")
-# def get_voters_data(
-#     view_type: str,  # part / ward
-#     part_no: Optional[str] = None,
-#     ward_no: Optional[int] = None,
-#     search: Optional[str] = None,
-#     limit: int = 500,
-#     offset: int = 0,
-#     current_user = Depends(get_current_user)
-# ):
-#     """
-#     Single API to return voters table view data
-#     in PART / WARD format (as per UI image)
-#     """
-
-#     try:
-#         main_admin_id = current_user.get("main_admin_id") or current_user.get("user_id")
-#         section_no = current_user.get("section_no")
-#         visited_col = f'Visited_{main_admin_id}'
-
-#         headers = [
-#             "Name",
-#             "Gender",
-#             "Age",
-#             "Address",
-#             "Visited",
-#             "Not Visited"
-#         ]
-
-#         where_clauses = ["TRUE"]
-#         params = []
-
-#         # Section restriction
-#         if section_no is not None:
-#             where_clauses.append('"SectionNo" = %s')
-#             params.append(section_no)
-
-#         # View based filters
-#         if view_type.lower() == "part" and part_no is not None:
-#             where_clauses.append('"PartNo" = %s')
-#             params.append(part_no)
-
-#         if view_type.lower() == "ward" and ward_no is not None:
-#             where_clauses.append('"SectionNo" = %s')
-#             params.append(ward_no)
-
-#         if search:
-#             where_clauses.append('("EName" ILIKE %s OR "VEName" ILIKE %s)')
-#             params.extend([f"%{search}%", f"%{search}%"])
-
-#         where_sql = " AND ".join(where_clauses)
-
-#         sql = f"""
-#             SELECT
-#                 "VEName",
-#                 "Sex",
-#                 "Age",
-#                 "Address",
-#                 COALESCE("{visited_col}", FALSE) AS visited
-#             FROM "VoterList"
-#             WHERE {where_sql}
-#             ORDER BY "VEName"
-#             LIMIT %s OFFSET %s
-#         """
-
-#         params.extend([limit, offset])
-
-#         table_data = []
-
-#         with get_connection() as conn:
-#             with conn.cursor() as cur:
-#                 cur.execute(sql, params)
-#                 rows = cur.fetchall()
-
-#                 for r in rows:
-#                     visited = 1 if r[4] else 0
-#                     not_visited = 0 if r[4] else 1
-
-#                     table_data.append([
-#                         r[0],                       # Name
-#                         "Male" if r[1] in ("M", "Male") else "Female",
-#                         r[2],                       # Age
-#                         r[3],                       # Address
-#                         visited,
-#                         not_visited
-#                     ])
-
-#         return {
-#             "type": view_type.lower(),
-#             "status": True,
-#             "data": {
-#                 "headers": headers,
-#                 "tableData": table_data
-#             }
-#         }
-
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
-
-# @app.get("/voters-data")
-# def get_voters_data(
-#     view_type: str,  # part / ward / surname
-#     part_no: Optional[str] = None,
-#     ward_no: Optional[int] = None,
-#     surname: Optional[str] = None,
-#     search: Optional[str] = None,
-#     limit: int = 500,
-#     offset: int = 0,
-#     current_user = Depends(get_current_user)
-# ):
-#     """
-#     Unified voters API
-#     view_type:
-#       - part
-#       - ward
-#       - surname (GROUPED like /voters_surname)
-#     """
-
-#     try:
-#         main_admin_id = current_user.get("main_admin_id") or current_user.get("user_id")
-#         section_no = current_user.get("section_no")
-#         visited_col = f'Visited_{main_admin_id}'
-
-#         # ================= COMMON WHERE =================
-#         where_clauses = ["TRUE"]
-#         params = []
-
-#         if section_no is not None:
-#             where_clauses.append('"SectionNo" = %s')
-#             params.append(section_no)
-
-#         if view_type.lower() == "part" and part_no:
-#             where_clauses.append('"PartNo" = %s')
-#             params.append(part_no)
-
-#         if view_type.lower() == "ward" and ward_no:
-#             where_clauses.append('"SectionNo" = %s')
-#             params.append(ward_no)
-
-#         if view_type.lower() == "surname" and surname:
-#             where_clauses.append('"Surname" ILIKE %s')
-#             params.append(f"%{surname}%")
-
-#         if search:
-#             where_clauses.append('("EName" ILIKE %s OR "VEName" ILIKE %s)')
-#             params.extend([f"%{search}%", f"%{search}%"])
-
-#         where_sql = " AND ".join(where_clauses)
-
-#         # =================================================
-#         # 🔵 SURNAME GROUPED VIEW (EXACT LOGIC PRESERVED)
-#         # =================================================
-#         if view_type.lower() == "surname":
-
-#             sql = f'''
-#                 SELECT
-#                     "VEName",
-#                     "Surname",
-#                     "IDCardNo",
-#                     "Sex",
-#                     "Age"
-#                 FROM "VoterList"
-#                 WHERE {where_sql}
-#                 ORDER BY "Surname" ASC, "VEName" ASC
-#                 LIMIT %s OFFSET %s
-#             '''
-
-#             params_with_page = params + [limit, offset]
-
-#             with get_connection() as conn:
-#                 with conn.cursor() as cur:
-#                     cur.execute(sql, params_with_page)
-#                     rows = cur.fetchall()
-#                     columns = [d[0] for d in cur.description]
-
-#                     raw = [dict(zip(columns, row)) for row in rows]
-
-#                     # GROUP BY surname (SAME AS /voters_surname)
-#                     grouped = {}
-#                     for r in raw:
-#                         s = (r["Surname"] or "").upper().strip()
-#                         if s not in grouped:
-#                             grouped[s] = []
-#                         grouped[s].append({
-#                             "VEName": r["VEName"],
-#                             "IDCardNo": r["IDCardNo"],
-#                             "Gender": r["Sex"],
-#                             "Age": r["Age"]
-#                         })
-
-#                     result = [
-#                         {"surname": s, "members": grouped[s]}
-#                         for s in sorted(grouped.keys())
-#                     ]
-
-#                     # Count distinct surnames
-#                     count_sql = f'''
-#                         SELECT COUNT(DISTINCT "Surname")
-#                         FROM "VoterList"
-#                         WHERE {where_sql}
-#                     '''
-#                     cur.execute(count_sql, tuple(params))
-#                     total = cur.fetchone()[0]
-
-#             return {
-#                 "type": "surname",
-#                 "status": True,
-#                 "total": int(total),
-#                 "data": result
-#             }
-
-#         # =================================================
-#         # 🟢 PART / WARD NORMAL TABLE VIEW
-#         # =================================================
-#         headers = ["Name", "Gender", "Age", "Address", "Visited", "Not Visited"]
-
-#         sql = f'''
-#             SELECT
-#                 "VEName",
-#                 "Sex",
-#                 "Age",
-#                 "Address",
-#                 COALESCE("{visited_col}", FALSE) AS visited
-#             FROM "VoterList"
-#             WHERE {where_sql}
-#             ORDER BY "VEName"
-#             LIMIT %s OFFSET %s
-#         '''
-
-#         params_with_page = params + [limit, offset]
-#         table_data = []
-
-#         with get_connection() as conn:
-#             with conn.cursor() as cur:
-#                 cur.execute(sql, params_with_page)
-#                 rows = cur.fetchall()
-
-#                 for r in rows:
-#                     visited = 1 if r[4] else 0
-#                     not_visited = 0 if r[4] else 1
-
-#                     table_data.append([
-#                         r[0],
-#                         "Male" if r[1] in ("M", "Male") else "Female",
-#                         r[2],
-#                         r[3],
-#                         visited,
-#                         not_visited
-#                     ])
-
-#         return {
-#             "type": view_type.lower(),
-#             "status": True,
-#             "data": {
-#                 "headers": headers,
-#                 "tableData": table_data
-#             }
-#         }
-
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
-
 @app.get("/voters-data")
 def get_voters_data(
     view_type: str,  # surname / part / address / ward
@@ -1030,121 +799,296 @@ def get_voters_data(
         raise HTTPException(status_code=500, detail=str(e))
 
 # # -------------------- SUBMIT SURVEY (kept logic but hardened) --------------------
-@app.post("/submit-survey", response_model=SurveySubmissionResponse)
-def submit_survey(request: SurveySubmissionRequest, current_user = Depends(get_current_user)):
-    """Submit survey form data and mark voters as visited.
-    
-    - Fetches family head details from VoterList
-    - Counts male/female family members
-    - Inserts survey into SurveyData
-    - Updates Visited_<admin_id> column for all selected family members
-    """
-    try:
-        main_admin_id = request.main_admin_id or current_user.get("main_admin_id") or current_user.get("user_id")
-        section_no = current_user.get("section_no")
+# @app.post("/submit-survey", response_model=SurveySubmissionResponse)
+# def submit_survey(
+#     request: SurveySubmissionRequest,
+#     current_user = Depends(get_current_user)
+# ):
+#     """Submit survey form data and mark voters as visited."""
+#     try:
+#         main_admin_id = (
+#             request.main_admin_id
+#             or current_user.get("main_admin_id")
+#             or current_user.get("user_id")
+#         )
+#         section_no = current_user.get("section_no")
+
+#         with get_connection() as conn:
+#             with conn.cursor() as cur:
+
+#                 # ------------------ FAMILY HEAD ------------------
+#                 cur.execute("""
+#                     SELECT "EName", "VEName", "SectionNo", "Sex", "Age",
+#                            "VAddress", "PartNo"
+#                     FROM "VoterList"
+#                     WHERE "VoterID" = %s
+#                 """, (request.family_head_id,))
+
+#                 head_row = cur.fetchone()
+#                 if not head_row:
+#                     raise HTTPException(
+#                         status_code=404,
+#                         detail="Family head not found"
+#                     )
+
+#                 head = dict(zip([d[0] for d in cur.description], head_row))
+
+#                 if section_no is not None and head["SectionNo"] != section_no:
+#                     raise HTTPException(
+#                         status_code=403,
+#                         detail="Family head does not belong to your Section"
+#                     )
+
+#                 # ------------------ FAMILY COUNTS ------------------
+#                 if request.selected_family_ids:
+#                     placeholders = ",".join(["%s"] * len(request.selected_family_ids))
+#                     cur.execute(
+#                         f'''
+#                         SELECT "Sex"
+#                         FROM "VoterList"
+#                         WHERE "VoterID" IN ({placeholders})
+#                         ''',
+#                         request.selected_family_ids
+#                     )
+#                     fam_rows = cur.fetchall()
+#                     family_members = [
+#                         dict(zip([d[0] for d in cur.description], r))
+#                         for r in fam_rows
+#                     ]
+
+#                     male_count = len(
+#                         [m for m in family_members if m["Sex"] in ("M", "Male")]
+#                     )
+#                     female_count = len(
+#                         [m for m in family_members if m["Sex"] in ("F", "Female")]
+#                     )
+#                     total_voters = len(family_members)
+#                 else:
+#                     male_count = female_count = total_voters = 0
+
+#                 # ------------------ SURVEY INSERT ------------------
+#                 head_choice = f'{head["EName"]} ({head["VEName"]}) - {request.house_number}'
+
+#                 cur.execute("""
+#                     INSERT INTO "SurveyData"
+#                     ("VoterID", "VEName", "HouseNo", "Landmark", "VAddress",
+#                      "Mobile", "SectionNo", "VotersCount", "Male", "Female",
+#                      "Caste", "Sex", "PartNo", "Age", "UserID")
+#                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+#                     RETURNING "SurveyNo"
+#                 """, (
+#                     request.family_head_id,
+#                     head_choice,
+#                     request.house_number,
+#                     request.landmark,
+#                     head["VAddress"],
+#                     request.mobile,
+#                     head["SectionNo"],
+#                     total_voters,
+#                     male_count,
+#                     female_count,
+#                     request.caste,
+#                     head["Sex"],
+#                     head["PartNo"],
+#                     head["Age"],
+#                     main_admin_id
+#                 ))
+
+#                 survey_id = cur.fetchone()[0]
+
+#                 # ------------------ VISITED UPDATE (FIXED) ------------------
+#                 if request.selected_family_ids:
+#                     visited_col = f'Visited_{main_admin_id}'
+
+#                     # Check if admin-specific column exists
+#                     cur.execute(
+#                         """
+#                         SELECT 1
+#                         FROM information_schema.columns
+#                         WHERE table_name = %s
+#                         AND column_name = %s
+#                         """,
+#                         ("VoterList", visited_col)
+#                     )
+
+#                     # 🔥 FALLBACK FOR ADMINS WITHOUT SUB-USERS
+#                     if cur.fetchone() is None:
+#                         visited_col = "Visited"
+
+#                     placeholders = ",".join(["%s"] * len(request.selected_family_ids))
+
+#                     query = f'''
+#                         UPDATE "VoterList"
+#                         SET "{visited_col}" = %s::boolean
+#                         WHERE "VoterID" IN ({placeholders})
+#                     '''
+
+#                     cur.execute(
+#                         query,
+#                         [bool(request.visited)] + request.selected_family_ids
+#                     )
+
+#                 conn.commit()
+
+#         return SurveySubmissionResponse(
+#             success=True,
+#             message="Survey submitted successfully",
+#             survey_id=survey_id
+#         )
+
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         raise HTTPException(
+#             status_code=500,
+#             detail=f"Error submitting survey: {str(e)}"
+#         )
+
+# @app.post("/submit-survey", response_model=SurveySubmissionResponse)
+# def submit_survey(request: SurveySubmissionRequest, current_user = Depends(get_current_user)):
+#     """Submit survey form data and mark voters as visited."""
+#     try:
+#         main_admin_id = request.main_admin_id or current_user.get("main_admin_id") or current_user.get("user_id")
+#         section_no = current_user.get("section_no")
         
+#         with get_connection() as conn:
+#             with conn.cursor() as cur:
+#                 # Fetch family head details
+#                 cur.execute("""
+#                     SELECT "EName", "VEName", "SectionNo", "Sex", "Age", 
+#                     "VAddress", "PartNo"
+#                     FROM "VoterList"
+#                     WHERE "VoterID" = %s
+#                 """, (request.family_head_id,))
+                
+#                 head_row = cur.fetchone()
+#                 if not head_row:
+#                     raise HTTPException(status_code=404, detail="Family head not found")
+                
+#                 head = dict(zip([d[0] for d in cur.description], head_row))
+                
+#                 # ✅ FIX: Remove or relax section validation
+#                 # The issue is that section_no might be None or the check is too strict
+#                 user_section = current_user.get("section_no")
+#                 head_section = head.get("SectionNo")
+                
+#                 # Only validate if user has a section assigned
+#                 if user_section is not None and head_section != user_section:
+#                     raise HTTPException(
+#                         status_code=403, 
+#                         detail=f"Family head (Section {head_section}) does not belong to your Section ({user_section})"
+#                     )
+                
+#                 # Get family member counts
+#                 if request.selected_family_ids:
+#                     placeholders = ",".join(["%s"] * len(request.selected_family_ids))
+#                     cur.execute(
+#                         f'SELECT "Sex" FROM "VoterList" WHERE "VoterID" IN ({placeholders})',
+#                         request.selected_family_ids
+#                     )
+#                     fam_rows = cur.fetchall()
+#                     family_members = [dict(zip([d[0] for d in cur.description], row)) for row in fam_rows]
+#                     male_count = len([m for m in family_members if m["Sex"] in ("M", "Male")])
+#                     female_count = len([m for m in family_members if m["Sex"] in ("F", "Female")])
+#                     total_voters = len(family_members)
+#                 else:
+#                     male_count = female_count = 0
+#                     total_voters = 0
+                
+#                 # Prepare head choice display name
+#                 head_choice = f'{head["EName"]} ({head["VEName"]}) - {request.house_number}'
+                
+#                 # ✅ FIX: Sanitize age value (handle time strings, nulls, etc.)
+#                 raw_age = head.get("Age")
+#                 try:
+#                     # Try to convert to integer
+#                     if raw_age is None:
+#                         clean_age = None
+#                     elif isinstance(raw_age, (int, float)):
+#                         clean_age = int(raw_age)
+#                     elif isinstance(raw_age, str):
+#                         # Remove any non-numeric characters
+#                         numeric_part = ''.join(filter(str.isdigit, raw_age))
+#                         clean_age = int(numeric_part) if numeric_part else None
+#                     else:
+#                         clean_age = None
+#                 except (ValueError, TypeError):
+#                     clean_age = None
+                
+#                 # Insert into SurveyData
+#                 cur.execute("""
+#                     INSERT INTO "SurveyData"
+#                     ("VoterID", "VEName", "HouseNo", "Landmark", "VAddress", "Mobile",
+#                     "SectionNo", "VotersCount", "Male", "Female", "Caste",
+#                     "Sex", "PartNo", "Age", "UserID")
+#                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+#                     RETURNING "SurveyNo"
+#                 """, (
+#                     request.family_head_id,
+#                     head_choice,
+#                     request.house_number,
+#                     request.landmark,
+#                     head["VAddress"],
+#                     request.mobile,
+#                     head["SectionNo"],
+#                     total_voters,
+#                     male_count,
+#                     female_count,
+#                     request.caste,
+#                     head["Sex"],
+#                     head["PartNo"],
+#                     clean_age,  # ✅ Use sanitized age
+#                     main_admin_id
+#                 ))
+                
+#                 survey_row = cur.fetchone()
+#                 survey_id = survey_row[0] if survey_row else None
+                
+#                 # Mark voters as visited (with column creation if needed)
+#                 if request.selected_family_ids:
+#                     visited_col = f'Visited_{main_admin_id}'
 
-        with get_connection() as conn:
-            with conn.cursor() as cur:
-                # Fetch family head details
-                cur.execute("""
-                    SELECT "EName", "VEName", "SectionNo", "Sex", "Age", 
-                    "VAddress", "PartNo"
-                    FROM "VoterList"
-                    WHERE "VoterID" = %s
-                """, (request.family_head_id,))
+#                     # Check if column exists
+#                     cur.execute("""
+#                         SELECT column_name 
+#                         FROM information_schema.columns
+#                         WHERE table_name = 'VoterList' AND column_name = %s
+#                     """, (visited_col,))
+                    
+#                     col_exists = cur.fetchone() is not None
+                    
+#                     # Create column if it doesn't exist
+#                     if not col_exists:
+#                         cur.execute(f'''
+#                             ALTER TABLE "VoterList" 
+#                             ADD COLUMN "{visited_col}" BOOLEAN DEFAULT FALSE
+#                         ''')
+#                         conn.commit()
+#                         print(f"✅ Created column {visited_col}")
+                    
+#                     # Update the visited status
+#                     placeholders = ",".join(["%s"] * len(request.selected_family_ids))
+#                     cur.execute(
+#                         f'UPDATE "VoterList" SET "{visited_col}" = %s::boolean WHERE "VoterID" IN ({placeholders})',
+#                         [bool(request.visited)] + request.selected_family_ids
+#                     )
                 
-                head_row = cur.fetchone()
-                if not head_row:
-                    raise HTTPException(status_code=404, detail="Family head not found")
-                
-                head = dict(zip([d[0] for d in cur.description], head_row))
-                if section_no is not None and head.get("SectionNo") != section_no:
-                    raise HTTPException(status_code=403, detail="Family head does not belong to your Section")
-                
-                # Get family member counts (only if ids provided)
-                if request.selected_family_ids:
-                    placeholders = ",".join(["%s"] * len(request.selected_family_ids))
-                    cur.execute(
-                        f'SELECT "Sex" FROM "VoterList" WHERE "VoterID" IN ({placeholders})',
-                        request.selected_family_ids
-                    )
-                    fam_rows = cur.fetchall()
-                    family_members = [dict(zip([d[0] for d in cur.description], row)) for row in fam_rows]
-                    male_count = len([m for m in family_members if m["Sex"] in ("M", "Male")])
-                    female_count = len([m for m in family_members if m["Sex"] in ("F", "Female")])
-                    total_voters = len(family_members)
-                else:
-                    male_count = female_count = 0
-                    total_voters = 0
-                
-                # Prepare head choice display name
-                head_choice = f'{head["EName"]} ({head["VEName"]}) - {request.house_number}'
-                
-                # Insert into SurveyData
-                cur.execute("""
-                    INSERT INTO "SurveyData"
-                    ("VoterID", "VEName", "HouseNo", "Landmark", "VAddress", "Mobile",
-                    "SectionNo", "VotersCount", "Male", "Female", "Caste",
-                    "Sex", "PartNo", "Age", "UserID")
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    RETURNING "SurveyNo"
-                """, (
-                    request.family_head_id,
-                    head_choice,
-                    request.house_number,
-                    request.landmark,
-                    head["VAddress"],
-                    request.mobile,
-                    head["SectionNo"],
-                    total_voters,
-                    male_count,
-                    female_count,
-                    request.caste,
-                    head["Sex"],
-                    head["PartNo"],
-                    head["Age"],
-                    main_admin_id
-                ))
-                
-                survey_row = cur.fetchone()
-                survey_id = survey_row[0] if survey_row else None
-                
-                # Mark voters as visited in the Visited_<admin_id> column
-                if request.selected_family_ids:
-                    visited_col = f'Visited_{main_admin_id}'
-
-                    # check visited column exists before updating
-                    cur.execute(
-                        """
-                        SELECT column_name FROM information_schema.columns
-                        WHERE table_name = %s AND column_name = %s
-                        """,
-                        ("VoterList", visited_col)
-                    )
-                    if cur.fetchone() is None:
-                        # If column doesn't exist, raise user-friendly error
-                        raise HTTPException(status_code=400, detail=f"Visited column '{visited_col}' does not exist in VoterList")
-
-                    placeholders = ",".join(["%s"] * len(request.selected_family_ids))
-                    # Cast visited value to boolean - accept 0/1 or True/False
-                    cur.execute(
-                        f'UPDATE "VoterList" SET "{visited_col}" = %s::boolean WHERE "VoterID" IN ({placeholders})',
-                        [bool(request.visited)] + request.selected_family_ids
-                    )
-                
-                conn.commit()
+#                 conn.commit()
         
-        return SurveySubmissionResponse(
-            success=True,
-            message="Survey submitted successfully",
-            survey_id=survey_id
-        )
+#         return SurveySubmissionResponse(
+#             success=True,
+#             message="Survey submitted successfully",
+#             survey_id=survey_id
+#         )
     
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error submitting survey: {str(e)}")
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         import traceback
+#         error_trace = traceback.format_exc()
+#         print(f"Error in submit_survey: {error_trace}")
+#         raise HTTPException(status_code=500, detail=f"Error submitting survey: {str(e)}")
+
 
 
 @app.get("/surveys")

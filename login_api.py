@@ -15,7 +15,7 @@ token_blacklist = set()
 SECRET_KEY = "your-secret-key-change-this-12345"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 10080  # 7 days
-SESSION_TIMEOUT_HOURS = 24
+SESSION_TIMEOUT_HOURS = 48
 INACTIVITY_TIMEOUT_MINUTES = 400
 
 # Database connection string (your NeonDB)

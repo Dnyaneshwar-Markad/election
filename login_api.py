@@ -922,88 +922,6 @@ def get_voters(search: Optional[str] = None, limit: int = 1000, offset: int = 0,
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# @app.get("/voters/list")
-# def get_voter_list(
-#     search: Optional[str] = None,
-#     address: Optional[str] = None,
-#     partno: Optional[str] = None,
-#     min_age: Optional[int] = None,
-#     max_age: Optional[int] = None,
-#     offset: int = 0,
-#     limit: int = 100,
-#     current_user = Depends(get_current_user)
-# ):
-#     """
-#     Paginated, filterable voter list for UI.
-#     Returns {"total": <int>, "rows": [ ... ]} (total is count of matched rows)
-#     """
-#     try:
-#         main_admin_id = current_user.get("main_admin_id") or current_user.get("user_id")
-#         visited_col = f'Visited_{main_admin_id}'
-
-#         where_clauses = ["TRUE"]
-#         params: List[Any] = []
-#         section_no = current_user.get("section_no")
-#         where_clauses.append('"SectionNo" = %s')
-#         params.append(section_no)
-
-#         if search:
-#             where_clauses.append('("EName" ILIKE %s OR "VEName" ILIKE %s)')
-#             params.extend([f"%{search}%", f"%{search}%"])
-
-#         if address:
-#             where_clauses.append('"Address" = %s')
-#             params.append(address)
-
-#         if partno:
-#             where_clauses.append('"PartNo" = %s')
-#             params.append(partno)
-
-#         if min_age is not None:
-#             where_clauses.append('"Age" >= %s')
-#             params.append(min_age)
-
-#         if max_age is not None:
-#             where_clauses.append('"Age" <= %s')
-#             params.append(max_age)
-
-#         where_sql = " AND ".join(where_clauses)
-
-#         data_sql = f'''
-#             SELECT "VoterID","PartNo","SectionNo","EName","VEName","Sex","Age",
-#             "Address","VAddress", "{visited_col}" AS "Visited"
-#             FROM "VoterList"
-#             WHERE {where_sql}
-#             ORDER BY "VoterID"
-#             LIMIT %s OFFSET %s
-#         '''
-#         data_params = tuple(params + [limit, offset])
-
-#         count_sql = f'''SELECT COUNT(*) FROM "VoterList" WHERE {where_sql}'''
-
-#         with get_connection() as conn:
-#             # profile = get_user_profile(main_admin_id)
-            
-#             with conn.cursor() as cur:
-                
-                
-                
-#                 cur.execute(data_sql, data_params)
-#                 rows = cur.fetchall()
-#                 columns = [d[0] for d in cur.description]
-#                 data = [dict(zip(columns, r)) for r in rows]
-
-#                 # total matched
-#                 cur.execute(count_sql, tuple(params))
-#                 total = cur.fetchone()[0]
-
-#         return {"status": True,
-#             # "profile": profile,
-#             "total": total, 
-#             "rows": data}
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
-
 @app.get("/voters/list")
 def get_voter_list(
     search: Optional[str] = None,
@@ -1016,36 +934,18 @@ def get_voter_list(
     current_user = Depends(get_current_user)
 ):
     """
-    Combined API:
-    - User profile data (like /user/profile)
-    - Voter list data (same as existing response)
-
-    Response:
-    {
-        "status": true,
-        "user": {...},
-        "total": int,
-        "rows": [...]
-    }
+    Paginated, filterable voter list for UI.
+    Returns {"total": <int>, "rows": [ ... ]} (total is count of matched rows)
     """
     try:
-        # -------------------------
-        # USER CONTEXT
-        # -------------------------
-        user_id = current_user.get("user_id")
-        main_admin_id = current_user.get("main_admin_id") or user_id
+        main_admin_id = current_user.get("main_admin_id") or current_user.get("user_id")
+        visited_col = f'Visited_{main_admin_id}'
+
+        where_clauses = ["TRUE"]
+        params: List[Any] = []
         section_no = current_user.get("section_no")
-
-        if not user_id or not section_no:
-            raise HTTPException(status_code=403, detail="Invalid user session")
-
-        visited_col = f"Visited_{main_admin_id}"
-
-        # -------------------------
-        # WHERE CLAUSE
-        # -------------------------
-        where_clauses = ['"SectionNo" = %s']
-        params: List[Any] = [section_no]
+        where_clauses.append('"SectionNo" = %s')
+        params.append(section_no)
 
         if search:
             where_clauses.append('("EName" ILIKE %s OR "VEName" ILIKE %s)')
@@ -1069,99 +969,33 @@ def get_voter_list(
 
         where_sql = " AND ".join(where_clauses)
 
-        # -------------------------
-        # DATABASE
-        # -------------------------
+        data_sql = f'''
+            SELECT "VoterID","PartNo","SectionNo","EName","VEName","Sex","Age",
+            "Address","VAddress", "{visited_col}" AS "Visited"
+            FROM "VoterList"
+            WHERE {where_sql}
+            ORDER BY "VoterID"
+            LIMIT %s OFFSET %s
+        '''
+        data_params = tuple(params + [limit, offset])
+
+        count_sql = f'''SELECT COUNT(*) FROM "VoterList" WHERE {where_sql}'''
+
         with get_connection() as conn:
             with conn.cursor() as cur:
-
-                # ======================================================
-                # 🔹 USER PROFILE QUERY (INSIDE voters/list)
-                # ======================================================
-                cur.execute(
-                    """
-                    SELECT "UserID", "FullName", "Symbol", "SerialNo"
-                    FROM "User"
-                    WHERE "UserID" = %s
-                    """,
-                    (main_admin_id,)
-                )
-                user_row = cur.fetchone()
-                if not user_row:
-                    raise HTTPException(status_code=404, detail="User not found")
-
-                user_columns = [d[0] for d in cur.description]
-                user_data = dict(zip(user_columns, user_row))
-
-                # ======================================================
-                # 🔹 CHECK IF Visited_<admin> COLUMN EXISTS
-                # ======================================================
-                cur.execute(
-                    """
-                    SELECT 1
-                    FROM information_schema.columns
-                    WHERE table_name = 'VoterList'
-                    AND column_name = %s
-                    """,
-                    (visited_col,)
-                )
-                has_visited_col = cur.fetchone() is not None
-
-                visited_sql = (
-                    f'"{visited_col}" AS "Visited"'
-                    if has_visited_col
-                    else 'FALSE AS "Visited"'
-                )
-
-                # ======================================================
-                # 🔹 VOTER DATA QUERY
-                # ======================================================
-                data_sql = f'''
-                    SELECT
-                        "VoterID","PartNo","SectionNo","EName","VEName",
-                        "Sex","Age","Address","VAddress",
-                        {visited_sql}
-                    FROM "VoterList"
-                    WHERE {where_sql}
-                    ORDER BY "VoterID"
-                    LIMIT %s OFFSET %s
-                '''
-
-                cur.execute(data_sql, tuple(params + [limit, offset]))
+                cur.execute(data_sql, data_params)
                 rows = cur.fetchall()
-                columns = [desc[0] for desc in cur.description]
-                voter_data = [dict(zip(columns, row)) for row in rows]
+                columns = [d[0] for d in cur.description]
+                data = [dict(zip(columns, r)) for r in rows]
 
-                # ======================================================
-                # 🔹 TOTAL COUNT
-                # ======================================================
-                count_sql = f'''
-                    SELECT COUNT(*)
-                    FROM "VoterList"
-                    WHERE {where_sql}
-                '''
+                # total matched
                 cur.execute(count_sql, tuple(params))
                 total = cur.fetchone()[0]
 
-        # -------------------------
-        # FINAL RESPONSE
-        # -------------------------
-        return {
-            "status": True,
-            "user": user_data,   # 👈 same as /user/profile
-            "total": total,
-            "rows": voter_data
-        }
-
-    except HTTPException:
-        raise
+        return {"total": total, "rows": data}
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error fetching voter list: {repr(e)}"
-        )
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/voters_surname")
 def get_voters_by_surname(

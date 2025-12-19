@@ -46,6 +46,7 @@ class LoginResponse(BaseModel):
     allocated: Optional[int] = None  # Added
     users: Optional[int] = None       # Added
     inactivity_timeout: int = INACTIVITY_TIMEOUT_MINUTES
+    profile: Optional[Dict[str, Any]]
 
 class ActivityUpdateRequest(BaseModel):
     """Request to update last activity timestamp"""
@@ -279,6 +280,28 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
+def get_user_profile_data(main_admin_id: int):
+    """
+    Fetch FullName, Symbol, SerialNo for main admin
+    """
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT "UserID", "FullName", "Symbol", "SerialNo"
+                FROM "User"
+                WHERE "UserID" = %s
+                """,
+                (main_admin_id,)
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+
+            columns = [desc[0] for desc in cur.description]
+            return dict(zip(columns, row))
+
+
 # ==================== ENDPOINTS ====================
 @app.get("/")
 def root():
@@ -306,66 +329,63 @@ def health_check():
             "error": str(e),
             "timestamp": datetime.utcnow().isoformat()
         }
-# ==================== FIXED: LOGIN ENDPOINT ====================
+
 @app.post("/login", response_model=LoginResponse)
 def login(form_data: OAuth2PasswordRequestForm = Depends()):
-    """Login endpoint"""
-    
     cleanup_expired_sessions()
-    
+
     user = validate_user(form_data.username, form_data.password)
-    
     if not user:
-        raise HTTPException(status_code=401, detail="Invalid username or password")
-    
-    if user.get("error") == "already_logged_in":
-        raise HTTPException(status_code=403, detail=user.get("message"))
-    
-    try:
-        new_session_id = generate_session_id()
-        session_expiry = datetime.utcnow() + timedelta(hours=SESSION_TIMEOUT_HOURS)
-        
-        # ✅ SET INITIAL LAST ACTIVITY
-        with get_connection() as conn: 
-            with conn.cursor() as cur:
-                cur.execute("""
-                    UPDATE "User"
-                    SET "Active" = TRUE,
-                        "LastLogin" = NOW(),
-                        "SessionID" = %s,
-                        "SessionExpiry" = %s,
-                        "LastActivity" = NOW()
-                    WHERE "UserID" = %s
-                """, (new_session_id, session_expiry, user["user_id"]))
-                conn.commit()
-        
-        print(f"✅ Login - UserID: {user['user_id']}, Inactivity timeout: {INACTIVITY_TIMEOUT_MINUTES}min")
-        
-        token = create_access_token({
-            "user_id": user["user_id"],
-            "username": user["username"],
-            "role": user["role"],
-            "main_admin_id": user["main_admin_id"],
-            "section_no": user["section_no"],
-            "session_id": new_session_id
-        })
-        
-        return LoginResponse(
-            access_token=token,
-            token_type="bearer",
-            user_id=user["user_id"],
-            username=user["username"],
-            role=user["role"],
-            main_admin_id=user["main_admin_id"],
-            section_no=user["section_no"],
-            allocated=user.get("allocated", 0),
-            users=user.get("users", 0),
-            inactivity_timeout=INACTIVITY_TIMEOUT_MINUTES  # ✅ Send to frontend
-        )
-    
-    except Exception as e:
-        print(f"❌ Login error: {e}")
-        raise HTTPException(status_code=500, detail=f"Error during login: {str(e)}")
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    if user.get("error"):
+        raise HTTPException(status_code=403, detail=user["message"])
+
+    session_id = generate_session_id()
+    expiry = datetime.utcnow() + timedelta(hours=SESSION_TIMEOUT_HOURS)
+
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE "User"
+                SET "Active"=TRUE,
+                    "LastLogin"=NOW(),
+                    "SessionID"=%s,
+                    "SessionExpiry"=%s,
+                    "LastActivity"=NOW()
+                WHERE "UserID"=%s
+            """, (session_id, expiry, user["user_id"]))
+            conn.commit()
+
+    token = create_access_token({
+        "user_id": user["user_id"],
+        "username": user["username"],
+        "role": user["role"],
+        "main_admin_id": user["main_admin_id"],
+        "section_no": user["section_no"],
+        "session_id": session_id
+    })
+
+    profile_data = get_user_profile_data(user["main_admin_id"])
+
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user_id": user["user_id"],
+        "username": user["username"],
+        "role": user["role"],
+        "main_admin_id": user["main_admin_id"],
+        "section_no": user["section_no"],
+        "allocated": user["allocated"],
+        "users": user["users"],
+        "inactivity_timeout": INACTIVITY_TIMEOUT_MINUTES,
+        "profile": {
+            "status": True,
+            "data": profile_data
+        }
+    }
+
+
 
 # ==================== UPDATE ACTIVITY ENDPOINT ====================
 @app.post("/activity/update")

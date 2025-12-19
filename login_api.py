@@ -877,8 +877,8 @@ def get_voter_list(
     search: Optional[str] = None,
     address: Optional[str] = None,
     partno: Optional[str] = None,
-    sex: Optional[str] = None,         # "M" / "F" or "Male" / "Female"
-    visited: Optional[bool] = None,    # true = visited, false = not visited
+    sex: Optional[str] = None,          # Male / Female
+    visited: Optional[bool] = None,     # true / false
     min_age: Optional[int] = None,
     max_age: Optional[int] = None,
     offset: int = 0,
@@ -886,83 +886,126 @@ def get_voter_list(
     current_user = Depends(get_current_user)
 ):
     """
-    Paginated, filterable voter list for UI.
-    Returns {"total": <int>, "rows": [ ... ]} (total is count of matched rows)
+    Paginated & filterable voter list with SurveyData join
+    Returns:
+    {
+        "total": <int>,
+        "rows": [ {...}, ... ]
+    }
     """
     try:
-        main_admin_id = current_user.get("main_admin_id") or current_user.get("user_id")
-        visited_col = f'Visited_{main_admin_id}'
+        # 🔐 User context
+        user_id = current_user.get("user_id")
+        main_admin_id = current_user.get("main_admin_id") or user_id
+        section_no = current_user.get("section_no")
 
+        visited_col = f'Visited_{main_admin_id}'
+        visited_expr = f'"VoterList"."{visited_col}"'
+
+        # 🔎 Dynamic filters
         where_clauses = ["TRUE"]
         params: List[Any] = []
-        section_no = current_user.get("section_no")
-        where_clauses.append('"SectionNo" = %s')
+
+        # Section restriction
+        where_clauses.append('"VoterList"."SectionNo" = %s')
         params.append(section_no)
 
+        # Search
         if search:
-            where_clauses.append('("EName" ILIKE %s OR "VEName" ILIKE %s)')
+            where_clauses.append(
+                '("VoterList"."EName" ILIKE %s OR "VoterList"."VEName" ILIKE %s)'
+            )
             params.extend([f"%{search}%", f"%{search}%"])
 
+        # Address
         if address:
-            where_clauses.append('"Address" = %s')
+            where_clauses.append('"VoterList"."Address" = %s')
             params.append(address)
 
+        # PartNo
         if partno:
-            where_clauses.append('"PartNo" = %s')
+            where_clauses.append('"VoterList"."PartNo" = %s')
             params.append(partno)
 
+        # Age filters
         if min_age is not None:
-            where_clauses.append('"Age" >= %s')
+            where_clauses.append('"VoterList"."Age" >= %s')
             params.append(min_age)
 
         if max_age is not None:
-            where_clauses.append('"Age" <= %s')
+            where_clauses.append('"VoterList"."Age" <= %s')
             params.append(max_age)
-            
-        if sex :
-            # Normalize input
+
+        # Sex filter
+        if sex:
             sex = sex.lower()
-            if sex in ("male", "m","Male","M"):
-                where_clauses.append('"Sex" = %s')
+            if sex in ("male", "m"):
+                where_clauses.append('"VoterList"."Sex" = %s')
                 params.append("M")
-            elif sex in ("female", "f","Female","F"):
-                where_clauses.append('"Sex" = %s')
+            elif sex in ("female", "f"):
+                where_clauses.append('"VoterList"."Sex" = %s')
                 params.append("F")
-                
+
+        # Visited filter
         if visited is not None:
-            where_clauses.append(f'"{visited_col}" = %s')
-            params.append(visited)        
-        
+            where_clauses.append(f'{visited_expr} = %s')
+            params.append(visited)
 
         where_sql = " AND ".join(where_clauses)
 
-        data_sql = f'''
-            SELECT "VoterID","PartNo","SectionNo","EName","VEName","Sex","Age",
-            "Address","VAddress", "{visited_col}" AS "Visited"
+        # 📄 DATA QUERY (SurveyData JOIN)
+        data_sql = f"""
+            SELECT
+                "VoterList"."VoterID",
+                "VoterList"."PartNo",
+                "VoterList"."SectionNo",
+                "VoterList"."EName",
+                "VoterList"."VEName",
+                "VoterList"."Sex",
+                "VoterList"."Age",
+                "VoterList"."IDCardNo",
+                "VoterList"."VPSName",
+                "VoterList"."VRName" AS "RELATIVE",
+                "VoterList"."Address",
+                "VoterList"."VAddress",
+                {visited_expr} AS "Visited",
+                "SurveyData"."Mobile" AS "Mobile",
+                "SurveyData"."HouseNo" AS "HouseNo"
+            FROM "VoterList"
+            LEFT JOIN "SurveyData"
+                ON "VoterList"."VoterID" = "SurveyData"."VoterID"
+                AND "SurveyData"."UserID" = %s
+            WHERE {where_sql}
+            ORDER BY "VoterList"."VoterID"
+            LIMIT %s OFFSET %s
+        """
+
+        # 🔑 PARAM ORDER IS CRITICAL
+        data_params = tuple([main_admin_id] + params + [limit, offset])
+
+        # 🔢 COUNT QUERY
+        count_sql = f"""
+            SELECT COUNT(*)
             FROM "VoterList"
             WHERE {where_sql}
-            ORDER BY "VoterID"
-            LIMIT %s OFFSET %s
-        '''
-        data_params = tuple(params + [limit, offset])
-
-        count_sql = f'''SELECT COUNT(*) FROM "VoterList" WHERE {where_sql}'''
+        """
 
         with get_connection() as conn:
             with conn.cursor() as cur:
+                # Data
                 cur.execute(data_sql, data_params)
                 rows = cur.fetchall()
                 columns = [d[0] for d in cur.description]
                 data = [dict(zip(columns, r)) for r in rows]
 
-                # total matched
+                # Total
                 cur.execute(count_sql, tuple(params))
                 total = cur.fetchone()[0]
 
         return {"total": total, "rows": data}
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.get("/voters_surname")
 def get_voters_by_surname(

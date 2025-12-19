@@ -1,3 +1,4 @@
+
 from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
@@ -758,77 +759,6 @@ def get_user_status(current_user = Depends(get_current_user)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# -------------------- Data endpoints (for Streamlit client) --------------------
-# @app.get("/voters")
-# def get_voters(search: Optional[str] = None, limit: int = 1000, offset: int = 0, current_user = Depends(get_current_user)):
-#     """Return voter list (paginated). Protected endpoint.
-
-#     - `search` (optional): case-insensitive substring search on `EName` or `VEName`
-#     - `limit`, `offset`: pagination
-#     The endpoint returns JSON: {"total": <int>, "rows": [ ... ]}
-#     """
-#     try:
-#         main_admin_id = current_user.get("main_admin_id") or current_user.get("user_id")
-#         visited_col = f"Visited_{main_admin_id}"
-
-#         with get_connection() as conn:
-#             # check column existence once
-#             with conn.cursor() as meta:
-#                 meta.execute(
-#                     """
-#                     SELECT column_name FROM information_schema.columns
-#                     WHERE table_name = %s AND column_name = %s
-#                     """,
-#                     ("VoterList", visited_col)
-#                 )
-#                 col_exists = meta.fetchone() is not None
-
-#             visited_expr = f'"{visited_col}"' if col_exists else '"Visited"'
-
-#             # Build WHERE clause and parameters consistently
-#             where_clauses = ["TRUE"]
-#             where_params: list = []
-#             section_no = current_user.get("section_no")
-#             where_clauses.append('"SectionNo" = %s')
-#             where_params.append(section_no)
-#             if search:
-#                 where_clauses.append('("EName" ILIKE %s OR "VEName" ILIKE %s)')
-#                 where_params.extend([f"%{search}%", f"%{search}%"])
-
-#             where_sql = " AND ".join(where_clauses)
-
-#             # Data query (with limit/offset)
-#             data_sql = f'''
-#                 SELECT "VoterList"."VoterID","VoterList"."PartNo","VoterList"."SectionNo","VoterList"."EName","VoterList"."VEName","VoterList"."Sex","VoterList"."Age","VoterList"."IDCardNo","VoterList"."VRName" AS "RELATIVE",
-#                 "VoterList"."Address","VoterList"."VAddress",{visited_expr} AS "Visited",
-#                 "SurveyData"."Mobile" AS "Mobile",
-#                 "SurveyData"."HouseNo" AS "HouseNo"
-#                 FROM "VoterList" LEFT JOIN "SurveyData"
-#                 ON "VoterList"."VoterID" = "SurveyData"."VoterID" AND "SurveyData"."UserID" = %s
-#                 WHERE {where_sql}
-#                 ORDER BY "VoterList"."VoterID"
-#                 LIMIT %s OFFSET %s
-#             '''
-
-#             data_params = tuple(
-#                     [current_user["user_id"]] + where_params + [limit, offset]
-#                 )
-
-#             with conn.cursor() as cur:
-#                 cur.execute(data_sql, data_params)
-#                 rows = cur.fetchall()
-#                 columns = [d[0] for d in cur.description]
-#                 data = [dict(zip(columns, r)) for r in rows]
-
-#             # Total count (use same WHERE params)
-#             count_sql = f'SELECT COUNT(*) FROM "VoterList" WHERE {where_sql}'
-#             with conn.cursor() as c2:
-#                 c2.execute(count_sql, tuple(where_params))
-#                 total = c2.fetchone()[0]
-
-#             return {"total": total, "rows": data}
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
 @app.get("/voters")
 def get_voters(search: Optional[str] = None, limit: int = 1000, offset: int = 0, current_user = Depends(get_current_user)):
     """
@@ -1109,283 +1039,85 @@ def get_voter_filters(current_user = Depends(get_current_user)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# @app.get("/voters/summary")
-# def get_voter_summary(current_user = Depends(get_current_user)):
-#     """
-#     Returns summary statistics needed for the dashboard:
-#     - total voters
-#     - visited count (Visited_<admin_id>)
-#     - male / female counts
-#     - top addresses (total, visited, not_visited) limited to top 50 (changeable)
-#     """
-#     try:
-#         main_admin_id = current_user.get("main_admin_id") or current_user.get("user_id")
-#         section_no = current_user.get("section_no")
-#         visited_col = f'Visited_{main_admin_id}'
-
-#         with get_connection() as conn:
-#             cur = conn.cursor()
-
-#             # total
-#             if section_no is not None:
-#                 cur.execute('SELECT COUNT(*) FROM "VoterList" WHERE "SectionNo" = %s', (section_no,))
-#             else:
-#                 cur.execute('SELECT COUNT(*) FROM "VoterList"')
-#             total = cur.fetchone()[0] or 0
-            
-#             # visited (if column exists)
-#             cur.execute(
-#                 """
-#                 SELECT column_name FROM information_schema.columns
-#                 WHERE table_name = %s AND column_name = %s
-#                 """,
-#                 ("VoterList", visited_col)
-#             )
-#             col_exists = cur.fetchone() is not None
-
-#             if col_exists:
-#                 if section_no is not None:
-#                     cur.execute(f'SELECT COUNT(*) FROM "VoterList" WHERE "{visited_col}" = TRUE AND "SectionNo" = %s', (section_no,))
-#                 else:
-#                     cur.execute(f'SELECT COUNT(*) FROM "VoterList" WHERE "{visited_col}" = TRUE')
-#                 visited = cur.fetchone()[0] or 0
-#             else:
-#                 # fallback to generic Visited column if present
-#                 cur.execute(
-#                     """
-#                     SELECT column_name FROM information_schema.columns
-#                     WHERE table_name = %s AND column_name = %s
-#                     """,
-#                     ("VoterList", "Visited")
-#                 )
-#                 if cur.fetchone():
-#                     if section_no is not None:
-#                         cur.execute('SELECT COUNT(*) FROM "VoterList" WHERE "Visited" = TRUE AND "SectionNo" = %s', (section_no,))
-#                     else:
-#                         cur.execute('SELECT COUNT(*) FROM "VoterList" WHERE "Visited" = TRUE')
-#                     visited = cur.fetchone()[0] or 0
-#                 else:
-#                     visited = 0                
-
-#             # sex breakdown (respect section)
-#             if section_no is not None:
-#                 cur.execute('SELECT "Sex", COUNT(*) FROM "VoterList" WHERE "SectionNo" = %s GROUP BY "Sex"', (section_no,))
-#             else:
-#                 cur.execute('SELECT "Sex", COUNT(*) FROM "VoterList" GROUP BY "Sex"')
-#             sex_rows = cur.fetchall()
-#             sex_breakdown = {r[0]: r[1] for r in sex_rows}
-            
-#             # top addresses (by total voters) - include visited/not_visited counts
-#             address_sql = f'''
-#                 SELECT "Address",
-#                        COUNT(*) AS total,
-#                        SUM(CASE WHEN "{visited_col}" = TRUE THEN 1 ELSE 0 END) AS visited,
-#                        SUM(CASE WHEN "{visited_col}" = FALSE THEN 1 ELSE 0 END) AS not_visited
-#                 FROM "VoterList"
-#             '''
-#             if section_no is not None:
-#                 address_sql += ' WHERE "SectionNo" = %s '
-#                 address_sql += ' GROUP BY "Address" ORDER BY total DESC LIMIT 50'
-#                 cur.execute(address_sql, (section_no,))
-#             else:
-#                 address_sql += ' GROUP BY "Address" ORDER BY total DESC LIMIT 50'
-#                 cur.execute(address_sql)
-
-#             address_rows = cur.fetchall()
-#             address_chart = []
-#             for row in address_rows:
-#                 address_chart.append({
-#                     "Address": row[0],
-#                     "Total": int(row[1] or 0),
-#                     "Visited": int(row[2] or 0),
-#                     "NotVisited": int(row[3] or 0)
-#                 })
-
-#         return {
-#             "total": int(total),
-#             "visited": int(visited),
-#             "not_visited": int(total) - int(visited),
-#             "sex_breakdown": sex_breakdown,
-#             "address_chart": address_chart
-#         }
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
-
 @app.get("/voters/summary")
-def get_voter_summary(
-    view_type: Optional[str] = None,     # gender / visited / total
-    gender: Optional[str] = None,        # M / F
-    visited: Optional[bool] = None,      # true / false
-    search: Optional[str] = None,        # name filter
-    limit: int = 100,
-    offset: int = 0,
-    current_user = Depends(get_current_user)
-):
+def get_voter_summary(current_user = Depends(get_current_user)):
+    """
+    Returns summary statistics needed for the dashboard:
+    - total voters
+    - visited count (Visited_<admin_id>)
+    - male / female counts
+    - top addresses (total, visited, not_visited) limited to top 50 (changeable)
+    """
     try:
         main_admin_id = current_user.get("main_admin_id") or current_user.get("user_id")
-        section_no = current_user.get("section_no")
         visited_col = f'Visited_{main_admin_id}'
 
         with get_connection() as conn:
             cur = conn.cursor()
 
-            # ===== Check visited column =====
-            cur.execute("""
-                SELECT 1 FROM information_schema.columns
-                WHERE table_name=%s AND column_name=%s
-            """, ("VoterList", visited_col))
-            visited_expr = f'"{visited_col}"' if cur.fetchone() else '"Visited"'
+            # total
+            cur.execute('SELECT COUNT(*) FROM "VoterList"')
+            total = cur.fetchone()[0] or 0
 
-            # ===== BASE WHERE =====
-            where = ['"SectionNo" = %s']
-            params = [section_no]
+            # visited (if column exists)
+            cur.execute(
+                """
+                SELECT column_name FROM information_schema.columns
+                WHERE table_name = %s AND column_name = %s
+                """,
+                ("VoterList", visited_col)
+            )
+            col_exists = cur.fetchone() is not None
 
-            # ===== SEARCH FILTER (TOTAL) =====
-            if search:
-                where.append('("EName" ILIKE %s OR "VEName" ILIKE %s)')
-                params.extend([f"%{search}%", f"%{search}%"])
+            if col_exists:
+                cur.execute(f'SELECT COUNT(*) FROM "VoterList" WHERE "{visited_col}" = TRUE')
+                visited = cur.fetchone()[0] or 0
+            else:
+                # fallback to generic Visited column if present
+                cur.execute("""
+                    SELECT column_name FROM information_schema.columns
+                    WHERE table_name = %s AND column_name = %s
+                """, ("VoterList", "Visited"))
+                if cur.fetchone():
+                    cur.execute('SELECT COUNT(*) FROM "VoterList" WHERE "Visited" = TRUE')
+                    visited = cur.fetchone()[0] or 0
+                else:
+                    visited = 0
 
-            # ===== GENDER FILTER =====
-            if view_type == "gender" and gender:
-                where.append('"Sex" ILIKE %s')
-                params.append(gender)
+            # sex breakdown
+            cur.execute('SELECT "Sex", COUNT(*) FROM "VoterList" GROUP BY "Sex"')
+            sex_rows = cur.fetchall()
+            sex_breakdown = {r[0]: r[1] for r in sex_rows}
 
-            # ===== VISITED FILTER =====
-            if view_type == "visited" and visited is not None:
-                where.append(f'{visited_expr} = %s')
-                params.append(visited)
+            # top addresses (by total voters) - include visited/not_visited counts
+            cur.execute(f'''
+                SELECT "Address",
+                       COUNT(*) AS total,
+                       SUM(CASE WHEN "{visited_col}" = TRUE THEN 1 ELSE 0 END) AS visited,
+                       SUM(CASE WHEN "{visited_col}" = FALSE THEN 1 ELSE 0 END) AS not_visited
+                FROM "VoterList"
+                GROUP BY "Address"
+                ORDER BY total DESC
+                LIMIT 50
+            ''')
+            address_rows = cur.fetchall()
+            address_chart = []
+            for row in address_rows:
+                address_chart.append({
+                    "Address": row[0],
+                    "Total": int(row[1] or 0),
+                    "Visited": int(row[2] or 0),
+                    "NotVisited": int(row[3] or 0)
+                })
 
-            where_sql = " AND ".join(where)
-
-            # ============================================================
-            # ======================= GENDER VIEW =======================
-            # ============================================================
-            if view_type == "gender":
-                sql = f'''
-                    SELECT "VEName","Sex","IDCardNo","Age","Address","VoterID"
-                    FROM "VoterList"
-                    WHERE {where_sql}
-                    ORDER BY "Sex","VEName"
-                    LIMIT %s OFFSET %s
-                '''
-                cur.execute(sql, params + [limit, offset])
-                rows = cur.fetchall()
-
-                data = {}
-                for r in rows:
-                    key = "MALE" if r[1] in ("M", "Male") else "FEMALE" if r[1] in ("F", "Female") else "OTHER"
-                    data.setdefault(key, []).append({
-                        "VEName": r[0],
-                        "IDCardNo": r[2],
-                        "Age": r[3],
-                        "Address": r[4],
-                        "VoterID": r[5]
-                    })
-
-                cur.execute(f'''
-                    SELECT
-                        CASE
-                            WHEN "Sex" IN ('M','Male') THEN 'MALE'
-                            WHEN "Sex" IN ('F','Female') THEN 'FEMALE'
-                            ELSE 'OTHER'
-                        END,
-                        COUNT(*)
-                    FROM "VoterList"
-                    WHERE {where_sql}
-                    GROUP BY 1
-                ''', params)
-
-                summary = dict(cur.fetchall())
-
-                return {
-                    "type": "gender",
-                    "filters": {"gender": gender},
-                    "summary": summary,
-                    "data": [{"group": k, "count": len(v), "members": v} for k, v in data.items()]
-                }
-
-            # ============================================================
-            # ====================== VISITED VIEW =======================
-            # ============================================================
-            if view_type == "visited":
-                sql = f'''
-                    SELECT "VEName",{visited_expr},"IDCardNo","Sex","Age","Address","VoterID"
-                    FROM "VoterList"
-                    WHERE {where_sql}
-                    ORDER BY {visited_expr} DESC,"VEName"
-                    LIMIT %s OFFSET %s
-                '''
-                cur.execute(sql, params + [limit, offset])
-                rows = cur.fetchall()
-
-                data = {"VISITED": [], "NOT VISITED": []}
-                for r in rows:
-                    key = "VISITED" if r[1] else "NOT VISITED"
-                    data[key].append({
-                        "VEName": r[0],
-                        "IDCardNo": r[2],
-                        "Sex": r[3],
-                        "Age": r[4],
-                        "Address": r[5],
-                        "VoterID": r[6]
-                    })
-
-                cur.execute(f'''
-                    SELECT
-                        CASE WHEN {visited_expr}=TRUE THEN 'VISITED' ELSE 'NOT VISITED' END,
-                        COUNT(*)
-                    FROM "VoterList"
-                    WHERE {where_sql}
-                    GROUP BY 1
-                ''', params)
-
-                summary = dict(cur.fetchall())
-
-                return {
-                    "type": "visited",
-                    "filters": {"visited": visited},
-                    "summary": summary,
-                    "data": [{"group": k, "count": len(v), "members": v} for k, v in data.items()]
-                }
-
-            # ============================================================
-            # ======================== TOTAL VIEW =======================
-            # ============================================================
-            if view_type == "total":
-                sql = f'''
-                    SELECT "VEName","IDCardNo","Sex","Age","Address","VoterID",{visited_expr}
-                    FROM "VoterList"
-                    WHERE {where_sql}
-                    ORDER BY "VEName"
-                    LIMIT %s OFFSET %s
-                '''
-                cur.execute(sql, params + [limit, offset])
-                members = [
-                    {
-                        "VEName": r[0],
-                        "IDCardNo": r[1],
-                        "Sex": r[2],
-                        "Age": r[3],
-                        "Address": r[4],
-                        "VoterID": r[5],
-                        "Visited": r[6]
-                    } for r in cur.fetchall()
-                ]
-
-                cur.execute(f'SELECT COUNT(*) FROM "VoterList" WHERE {where_sql}', params)
-                total = cur.fetchone()[0]
-
-                return {
-                    "type": "total",
-                    "filters": {"search": search},
-                    "total": total,
-                    "data": members
-                }
-
-            return {"status": False, "message": "Invalid view_type"}
-
+        return {
+            "total": int(total),
+            "visited": int(visited),
+            "not_visited": int(total) - int(visited),
+            "sex_breakdown": sex_breakdown,
+            "address_chart": address_chart
+        }
     except Exception as e:
-        print("❌ voters/summary error:", e)
         raise HTTPException(status_code=500, detail=str(e))
     
     
@@ -1725,4 +1457,3 @@ def get_surveys(limit: int = 500, offset: int = 0, current_user = Depends(get_cu
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-

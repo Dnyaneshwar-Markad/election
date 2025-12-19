@@ -877,6 +877,8 @@ def get_voter_list(
     search: Optional[str] = None,
     address: Optional[str] = None,
     partno: Optional[str] = None,
+    sex: Optional[str] = None,         # "M" / "F" or "Male" / "Female"
+    visited: Optional[bool] = None,    # true = visited, false = not visited
     min_age: Optional[int] = None,
     max_age: Optional[int] = None,
     offset: int = 0,
@@ -916,6 +918,21 @@ def get_voter_list(
         if max_age is not None:
             where_clauses.append('"Age" <= %s')
             params.append(max_age)
+            
+        if sex :
+            # Normalize input
+            sex = sex.lower()
+            if sex in ("male", "m","Male","M"):
+                where_clauses.append('"Sex" = %s')
+                params.append("M")
+            elif sex in ("female", "f","Female","F"):
+                where_clauses.append('"Sex" = %s')
+                params.append("F")
+                
+        if visited is not None:
+            where_clauses.append(f'"{visited_col}" = %s')
+            params.append(visited)        
+        
 
         where_sql = " AND ".join(where_clauses)
 

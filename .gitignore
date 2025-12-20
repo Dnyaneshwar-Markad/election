@@ -1,0 +1,18 @@
+# OneDrive system files
+Desktop.ini
+*.lnk
+
+# Windows junk
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+.env
+venv/
+
+# Logs
+*.log
+
+# Node (if any)
+node_modules/

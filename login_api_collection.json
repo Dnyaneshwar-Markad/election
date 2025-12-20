@@ -121,7 +121,7 @@
   "variable": [
     {
       "key": "base_url",
-      "value": "https://election-are-near-backend.onrender.com/"
+      "value": "https://election-are-near-backend.onrender.com"
     },
     {
       "key": "token",

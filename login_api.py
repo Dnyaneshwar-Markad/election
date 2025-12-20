@@ -1496,17 +1496,12 @@ def get_surveys(limit: int = 500, offset: int = 0, current_user = Depends(get_cu
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-<<<<<<< HEAD
-
-
-
 # ==================== RUN ====================
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-=======
 # ==================== RUN ====================
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
->>>>>>> f2ae72a (Add gitignore)
+

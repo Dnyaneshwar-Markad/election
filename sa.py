@@ -25,8 +25,13 @@ from types import SimpleNamespace
 import requests
 
 # ==================== CONFIGURATION ====================
+<<<<<<< HEAD
 INACTIVITY_TIMEOUT_MINUTES = 15  # ⏱️ Auto-logout after 15 minutes of inactivity
 SESSION_WARNING_MINUTES = 13  
+=======
+INACTIVITY_TIMEOUT_MINUTES = 345  # ⏱️ Auto-logout after 15 minutes of inactivity
+SESSION_WARNING_MINUTES =   340
+>>>>>>> f2ae72a (Add gitignore)
 
 # ==================== SESSION STATE INITIALIZATION ====================
 def init_session_state():

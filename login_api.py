@@ -792,7 +792,7 @@ def get_voters(search: Optional[str] = None, limit: int = 1000, offset: int = 0,
 
         with get_connection() as conn:
 
-
+            col_exists = True
             visited_expr = f'"{visited_col}"' if col_exists else '"Visited"'
 
             # Build WHERE clause

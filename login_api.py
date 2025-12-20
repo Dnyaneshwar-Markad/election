@@ -791,30 +791,7 @@ def get_voters(search: Optional[str] = None, limit: int = 1000, offset: int = 0,
         section_no = current_user.get("section_no")
 
         with get_connection() as conn:
-<<<<<<< HEAD
-            # Check visited column existence
-            with conn.cursor() as meta:
-                meta.execute(
-                    """
-                    SELECT column_name FROM information_schema.columns
-                    WHERE table_name = %s AND column_name = %s
-                    """,
-                    ("VoterList", visited_col)
-                )
-                col_exists = meta.fetchone() is not None
-=======
-            # # Check visited column existence
-            # with conn.cursor() as meta:
-            #     meta.execute(
-            #         """
-            #         SELECT column_name FROM information_schema.columns
-            #         WHERE table_name = %s AND column_name = %s
-            #         """,
-            #         ("VoterList", visited_col)
-            #     )
-            #     col_exists = meta.fetchone() is not None
-            col_exists =True
->>>>>>> f2ae72a (Add gitignore)
+
 
             visited_expr = f'"{visited_col}"' if col_exists else '"Visited"'
 
@@ -1153,29 +1130,7 @@ def get_voter_summary(current_user = Depends(get_current_user)):
             cur.execute('SELECT COUNT(*) FROM "VoterList"')
             total = cur.fetchone()[0] or 0
 
-<<<<<<< HEAD
-            # visited (if column exists)
-            cur.execute(
-                """
-                SELECT column_name FROM information_schema.columns
-                WHERE table_name = %s AND column_name = %s
-                """,
-                ("VoterList", visited_col)
-            )
-            col_exists = cur.fetchone() is not None
-=======
-            # # visited (if column exists)
-            # cur.execute(
-            #     """
-            #     SELECT column_name FROM information_schema.columns
-            #     WHERE table_name = %s AND column_name = %s
-            #     """,
-            #     ("VoterList", visited_col)
-            # )
-            # col_exists = cur.fetchone() is not None
             col_exists = True
->>>>>>> f2ae72a (Add gitignore)
-
             if col_exists:
                 cur.execute(f'SELECT COUNT(*) FROM "VoterList" WHERE "{visited_col}" = TRUE')
                 visited = cur.fetchone()[0] or 0
@@ -1185,10 +1140,7 @@ def get_voter_summary(current_user = Depends(get_current_user)):
                     SELECT column_name FROM information_schema.columns
                     WHERE table_name = %s AND column_name = %s
                 """, ("VoterList", "Visited"))
-<<<<<<< HEAD
-=======
-                
->>>>>>> f2ae72a (Add gitignore)
+
                 if cur.fetchone():
                     cur.execute('SELECT COUNT(*) FROM "VoterList" WHERE "Visited" = TRUE')
                     visited = cur.fetchone()[0] or 0
@@ -1483,42 +1435,6 @@ def submit_survey(
                 # ------------------ VISITED UPDATE (FIXED) ------------------
                 if request.selected_family_ids:
                     visited_col = f'Visited_{main_admin_id}'
-
-<<<<<<< HEAD
-                    # Check if admin-specific column exists
-                    cur.execute(
-                        """
-                        SELECT 1
-                        FROM information_schema.columns
-                        WHERE table_name = %s
-                        AND column_name = %s
-                        """,
-                        ("VoterList", visited_col)
-                    )
-
-                    if cur.fetchone() is None:
-                        raise HTTPException(
-                            status_code=500,
-                            detail=f"Visited column '{visited_col}' does not exist. Contact admin."
-                        )
-=======
-                    # # Check if admin-specific column exists
-                    # cur.execute(
-                    #     """
-                    #     SELECT 1
-                    #     FROM information_schema.columns
-                    #     WHERE table_name = %s
-                    #     AND column_name = %s
-                    #     """,
-                    #     ("VoterList", visited_col)
-                    # )
-
-                    # if cur.fetchone() is None:
-                    #     raise HTTPException(
-                    #         status_code=500,
-                    #         detail=f"Visited column '{visited_col}' does not exist. Contact admin."
-                    #     )
->>>>>>> f2ae72a (Add gitignore)
                         
                     placeholders = ",".join(["%s"] * len(request.selected_family_ids))
 

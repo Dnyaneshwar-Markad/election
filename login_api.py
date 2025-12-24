@@ -1132,38 +1132,75 @@ def get_voter_filters(current_user = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/voters/summary")
-def get_voter_summary_optimized(current_user = Depends(get_current_user)):
+def get_voter_summary(current_user = Depends(get_current_user)):
     """
-    âœ… Return ONLY aggregated data, not individual rows
+    Returns summary statistics needed for the dashboard:
+    - total voters
+    - visited count (Visited_<admin_id>)
+    - male / female counts
+    - top addresses (total, visited, not_visited) limited to top 50 (changeable)
     """
     try:
-        section_no = current_user.get("section_no")
-        main_admin_id = current_user.get("main_admin_id")
+        main_admin_id = current_user.get("main_admin_id") or current_user.get("user_id")
         visited_col = f'Visited_{main_admin_id}'
-        
+
         with get_connection() as conn:
-            with conn.cursor() as cur:
-                # Single optimized query for all stats
-                cur.execute(f"""
-                    SELECT 
-                        COUNT(*) as total,
-                        SUM(CASE WHEN "{visited_col}" = TRUE THEN 1 ELSE 0 END) as visited,
-                        SUM(CASE WHEN "Sex" = 'M' THEN 1 ELSE 0 END) as male,
-                        SUM(CASE WHEN "Sex" = 'F' THEN 1 ELSE 0 END) as female
-                    FROM "VoterList"
-                    WHERE "SectionNo" = %s
-                """, (section_no,))
-                
-                row = cur.fetchone()
-                total, visited, male, female = row
-                
-                return {
-                    "total": int(total or 0),
-                    "visited": int(visited or 0),
-                    "not_visited": int((total or 0) - (visited or 0)),
-                    "male": int(male or 0),
-                    "female": int(female or 0)
-                }
+            cur = conn.cursor()
+
+            # total
+            cur.execute('SELECT COUNT(*) FROM "VoterList"')
+            total = cur.fetchone()[0] or 0
+
+            col_exists = True
+            if col_exists:
+                cur.execute(f'SELECT COUNT(*) FROM "VoterList" WHERE "{visited_col}" = TRUE')
+                visited = cur.fetchone()[0] or 0
+            else:
+                # fallback to generic Visited column if present
+                cur.execute("""
+                    SELECT column_name FROM information_schema.columns
+                    WHERE table_name = %s AND column_name = %s
+                """, ("VoterList", "Visited"))
+
+                if cur.fetchone():
+                    cur.execute('SELECT COUNT(*) FROM "VoterList" WHERE "Visited" = TRUE')
+                    visited = cur.fetchone()[0] or 0
+                else:
+                    visited = 0
+
+            # sex breakdown
+            cur.execute('SELECT "Sex", COUNT(*) FROM "VoterList" GROUP BY "Sex"')
+            sex_rows = cur.fetchall()
+            sex_breakdown = {r[0]: r[1] for r in sex_rows}
+
+            # top addresses (by total voters) - include visited/not_visited counts
+            cur.execute(f'''
+                SELECT "Address",
+                       COUNT(*) AS total,
+                       SUM(CASE WHEN "{visited_col}" = TRUE THEN 1 ELSE 0 END) AS visited,
+                       SUM(CASE WHEN "{visited_col}" = FALSE THEN 1 ELSE 0 END) AS not_visited
+                FROM "VoterList"
+                GROUP BY "Address"
+                ORDER BY total DESC
+                LIMIT 50
+            ''')
+            address_rows = cur.fetchall()
+            address_chart = []
+            for row in address_rows:
+                address_chart.append({
+                    "Address": row[0],
+                    "Total": int(row[1] or 0),
+                    "Visited": int(row[2] or 0),
+                    "NotVisited": int(row[3] or 0)
+                })
+
+        return {
+            "total": int(total),
+            "visited": int(visited),
+            "not_visited": int(total) - int(visited),
+            "sex_breakdown": sex_breakdown,
+            "address_chart": address_chart
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     

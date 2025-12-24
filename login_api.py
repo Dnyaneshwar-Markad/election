@@ -34,18 +34,7 @@ app.add_middleware(
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
 
-# ==================== CONNECTION POOL ====================
-from psycopg_pool import ConnectionPool
 
-pool = ConnectionPool(
-    DATABASE_URL,
-    min_size=5,
-    max_size=20,
-    timeout=30
-)
-
-def get_connection():
-    return pool.connection()
 # ==================== MODELS ====================
 class LoginResponse(BaseModel):
     access_token: str

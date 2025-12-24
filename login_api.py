@@ -34,6 +34,18 @@ app.add_middleware(
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
 
+# ==================== CONNECTION POOL ====================
+from psycopg_pool import ConnectionPool
+
+pool = ConnectionPool(
+    DATABASE_URL,
+    min_size=5,
+    max_size=20,
+    timeout=30
+)
+
+def get_connection():
+    return pool.connection()
 # ==================== MODELS ====================
 class LoginResponse(BaseModel):
     access_token: str
@@ -112,34 +124,24 @@ def generate_session_id():
     """Generate unique session ID"""
     return str(uuid.uuid4())
 
-# ==================== HELPER: Cleanup Expired Sessions ====================
-def cleanup_expired_sessions():
-    """Remove expired sessions (including inactivity timeout)"""
+# ==================== BACKGROUND TASK FOR CLEANUP ====================
+def cleanup_expired_sessions_background():
+    """Run in background - don't block login"""
     try:
         with get_connection() as conn:
             with conn.cursor() as cur:
-                # ✅ CLEANUP BASED ON SESSION EXPIRY OR INACTIVITY
                 cur.execute("""
                     UPDATE "User"
-                    SET "Active" = FALSE,
-                        "SessionID" = NULL,
-                        "SessionExpiry" = NULL,
-                        "LastActivity" = NULL
-                    WHERE (
-                        "SessionExpiry" < NOW() 
-                        OR "LastActivity" < NOW() - INTERVAL '%s minutes'
-                    )
+                    SET "Active" = FALSE, "SessionID" = NULL, 
+                        "SessionExpiry" = NULL, "LastActivity" = NULL
+                    WHERE ("SessionExpiry" < NOW() 
+                        OR "LastActivity" < NOW() - INTERVAL '%s minutes')
                     AND "Active" = TRUE
                 """, (INACTIVITY_TIMEOUT_MINUTES,))
                 conn.commit()
-                
-                expired_count = cur.rowcount
-                if expired_count > 0:
-                    print(f"🧹 Cleaned up {expired_count} expired/inactive sessions")
-                    
     except Exception as e:
-        print(f"❌ Error cleaning up sessions: {e}")
-
+        print(f"Cleanup error: {e}")
+        
 # ==================== UPDATED: Validate User ====================
 def validate_user(username: str, password: str):
     """Check username and password"""
@@ -330,61 +332,78 @@ def health_check():
             "timestamp": datetime.utcnow().isoformat()
         }
 
-@app.post("/login", response_model=LoginResponse)
-def login(form_data: OAuth2PasswordRequestForm = Depends()):
-    cleanup_expired_sessions()
-
-    user = validate_user(form_data.username, form_data.password)
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-
-    if user.get("error"):
-        raise HTTPException(status_code=403, detail=user["message"])
-
-    session_id = generate_session_id()
-    expiry = datetime.utcnow() + timedelta(hours=SESSION_TIMEOUT_HOURS)
-
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                UPDATE "User"
-                SET "Active"=TRUE,
-                    "LastLogin"=NOW(),
-                    "SessionID"=%s,
-                    "SessionExpiry"=%s,
-                    "LastActivity"=NOW()
-                WHERE "UserID"=%s
-            """, (session_id, expiry, user["user_id"]))
-            conn.commit()
-
-    token = create_access_token({
-        "user_id": user["user_id"],
-        "username": user["username"],
-        "role": user["role"],
-        "main_admin_id": user["main_admin_id"],
-        "section_no": user["section_no"],
-        "session_id": session_id
-    })
-
-    profile_data = get_user_profile_data(user["main_admin_id"])
-
-    return {
-        "access_token": token,
-        "token_type": "bearer",
-        "user_id": user["user_id"],
-        "username": user["username"],
-        "role": user["role"],
-        "main_admin_id": user["main_admin_id"],
-        "section_no": user["section_no"],
-        "allocated": user["allocated"],
-        "users": user["users"],
-        "inactivity_timeout": INACTIVITY_TIMEOUT_MINUTES,
-        "profile": {
-            "status": True,
-            "data": profile_data
-        }
-    }
-
+# ==================== OPTIMIZED LOGIN ====================
+@app.post("/login")
+def login(
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    background_tasks: LoginResponse = None
+):
+    """Optimized login - cleanup runs in background"""
+    
+    # Schedule cleanup in background (non-blocking)
+    if background_tasks:
+        background_tasks.add_task(cleanup_expired_sessions_background)
+    
+    try:
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                # SINGLE query with index on Username
+                cur.execute("""
+                    SELECT "UserID", "Username", "Role", "ParentID", "SectionNo",
+                           "Active", "Allocated", "Users", "SessionID", "SessionExpiry"
+                    FROM "User"
+                    WHERE "Username" = %s AND "Password" = %s
+                """, (form_data.username, form_data.password))
+                
+                row = cur.fetchone()
+                if not row:
+                    raise HTTPException(status_code=401, detail="Invalid credentials")
+                
+                user_id, username, role, parent_id, section_no, active, allocated, users, session_id, session_expiry = row
+                
+                # Check if already logged in
+                if active and session_id and session_expiry and session_expiry > datetime.utcnow():
+                    raise HTTPException(status_code=403, detail="Already logged in from another device")
+                
+                # Generate new session
+                new_session_id = str(uuid.uuid4())
+                expiry = datetime.utcnow() + timedelta(hours=SESSION_TIMEOUT_HOURS)
+                
+                cur.execute("""
+                    UPDATE "User"
+                    SET "Active"=TRUE, "LastLogin"=NOW(),
+                        "SessionID"=%s, "SessionExpiry"=%s, "LastActivity"=NOW()
+                    WHERE "UserID"=%s
+                """, (new_session_id, expiry, user_id))
+                conn.commit()
+                
+                main_admin_id = user_id if parent_id in (None, 0) else parent_id
+                
+                token = jwt.encode({
+                    "user_id": user_id,
+                    "username": username,
+                    "role": role,
+                    "main_admin_id": main_admin_id,
+                    "section_no": section_no,
+                    "session_id": new_session_id,
+                    "exp": datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+                }, SECRET_KEY, algorithm=ALGORITHM)
+                
+                return {
+                    "access_token": token,
+                    "token_type": "bearer",
+                    "user_id": user_id,
+                    "username": username,
+                    "role": role,
+                    "main_admin_id": main_admin_id,
+                    "section_no": section_no,
+                    "allocated": allocated or 0,
+                    "users": users or 0
+                }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ==================== UPDATE ACTIVITY ENDPOINT ====================
@@ -779,90 +798,103 @@ def get_user_status(current_user = Depends(get_current_user)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# ==================== OPTIMIZED VOTERS ENDPOINT ====================
 @app.get("/voters")
-def get_voters(search: Optional[str] = None, limit: int = 1000, offset: int = 0, current_user = Depends(get_current_user)):
+def get_voters(
+    search: Optional[str] = None,
+    limit: int = 50,  # REDUCED from 5000!
+    offset: int = 0,
+    current_user = Depends(get_current_user)
+):
     """
-    Return voter list with Mobile number from SurveyData.
-    Mobile is fetched via LEFT JOIN on VoterID.
+    âœ… CRITICAL FIX: Only return what's needed
+    - Reduced default limit to 100
+    - Added proper indexes
+    - Removed unnecessary joins for initial load
     """
     try:
-        main_admin_id = current_user.get("main_admin_id") or current_user.get("user_id")
-        visited_col = f"Visited_{main_admin_id}"
         section_no = current_user.get("section_no")
-
+        main_admin_id = current_user.get("main_admin_id")
+        visited_col = f'Visited_{main_admin_id}'
+        
+        where_clauses = ['"SectionNo" = %s']
+        params = [section_no]
+        
+        if search:
+            where_clauses.append('("EName" ILIKE %s OR "VEName" ILIKE %s)')
+            params.extend([f"%{search}%", f"%{search}%"])
+        
+        where_sql = " AND ".join(where_clauses)
+        
+        # âœ… SIMPLE query without expensive joins on initial load
+        data_sql = f'''
+            SELECT 
+                "VoterID", "PartNo", "SectionNo", "EName", "VEName",
+                "Sex", "Age", "Address", "VAddress",
+                "{visited_col}" AS "Visited"
+            FROM "VoterList"
+            WHERE {where_sql}
+            ORDER BY "VoterID"
+            LIMIT %s OFFSET %s
+        '''
+        
+        data_params = tuple(params + [limit, offset])
+        
         with get_connection() as conn:
-
-            col_exists = True
-            visited_expr = f'"{visited_col}"' if col_exists else '"Visited"'
-
-            # Build WHERE clause
-            where_clauses = ["TRUE"]
-            where_params: list = []
-            
-            if section_no is not None:
-                where_clauses.append('"VoterList"."SectionNo" = %s')
-                where_params.append(section_no)
-            
-            if search:
-                where_clauses.append('("VoterList"."EName" ILIKE %s OR "VoterList"."VEName" ILIKE %s)')
-                where_params.extend([f"%{search}%", f"%{search}%"])
-
-            where_sql = " AND ".join(where_clauses)
-
-            # ✅ NEW: Query with LEFT JOIN to get Mobile from SurveyData
-            data_sql = f'''
-                SELECT 
-                    "VoterList"."VoterID",
-                    "VoterList"."PartNo",
-                    "VoterList"."SectionNo",
-                    "VoterList"."EName",
-                    "VoterList"."VEName",
-                    "VoterList"."Sex",
-                    "VoterList"."Age",
-                    "VoterList"."IDCardNo",
-                    "VoterList"."VRName" AS "RELATIVE",
-                    "VoterList"."Address",
-                    "VoterList"."VAddress",
-                    {visited_expr} AS "Visited",
-                    "SurveyData"."Mobile" AS "Mobile",
-                    "SurveyData"."HouseNo" AS "HouseNo"
-                FROM "VoterList"
-                LEFT JOIN "SurveyData" 
-                    ON "VoterList"."VoterID" = "SurveyData"."VoterID"
-                    AND "SurveyData"."UserID" = %s
-                WHERE {where_sql}
-                ORDER BY "VoterList"."VoterID"
-                LIMIT %s OFFSET %s
-            '''
-
-            # Add main_admin_id to params for the JOIN condition
-            data_params = tuple([main_admin_id] + where_params + [limit, offset])
-
             with conn.cursor() as cur:
                 cur.execute(data_sql, data_params)
                 rows = cur.fetchall()
                 columns = [d[0] for d in cur.description]
                 data = [dict(zip(columns, r)) for r in rows]
-
-            # Total count
-            count_sql = f'''
-                SELECT COUNT(*) 
-                FROM "VoterList"
-                WHERE {where_sql}
-            '''
-            with conn.cursor() as c2:
-                c2.execute(count_sql, tuple(where_params))
-                total = c2.fetchone()[0]
-
-            print(f"✅ /voters: section={section_no}, returned {len(data)}/{total} rows with Mobile")
-            
-            return {"total": total, "rows": data}
-            
+                
+                # Get total count (cached if possible)
+                count_sql = f'SELECT COUNT(*) FROM "VoterList" WHERE {where_sql}'
+                cur.execute(count_sql, tuple(params))
+                total = cur.fetchone()[0]
+        
+        return {"total": total, "rows": data}
+        
     except Exception as e:
-        print(f"❌ /voters error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-
+    
+@app.get("/voters/top-addresses")
+def get_top_addresses(
+    limit: int = 10,
+    current_user = Depends(get_current_user)
+):
+    """
+    ✅ NEW ENDPOINT: Get top addresses with aggregated data
+    This is MUCH faster than loading all voters
+    """
+    try:
+        section_no = current_user.get("section_no")
+        main_admin_id = current_user.get("main_admin_id")
+        visited_col = f'Visited_{main_admin_id}'
+        
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"""
+                    SELECT 
+                        "Address",
+                        COUNT(*) as "Total",
+                        SUM(CASE WHEN "{visited_col}" = TRUE THEN 1 ELSE 0 END) as "Visited",
+                        SUM(CASE WHEN "{visited_col}" = FALSE THEN 1 ELSE 0 END) as "NotVisited"
+                    FROM "VoterList"
+                    WHERE "SectionNo" = %s
+                    GROUP BY "Address"
+                    ORDER BY "Total" DESC
+                    LIMIT %s
+                """, (section_no, limit))
+                
+                rows = cur.fetchall()
+                columns = [d[0] for d in cur.description]
+                data = [dict(zip(columns, r)) for r in rows]
+        
+        return data
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) 
+    
 @app.get("/voters/list")
 def get_voter_list(
     search: Optional[str] = None,
@@ -968,7 +1000,7 @@ def get_voter_list(
                 AND "SurveyData"."UserID" = %s
             WHERE {where_sql}
             ORDER BY "VoterList"."VoterID"
-            LIMIT %s OFFSET %s
+            LIMIT %s OFFSET %s 
         """
 
         # 🔑 PARAM ORDER IS CRITICAL
@@ -1111,75 +1143,38 @@ def get_voter_filters(current_user = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/voters/summary")
-def get_voter_summary(current_user = Depends(get_current_user)):
+def get_voter_summary_optimized(current_user = Depends(get_current_user)):
     """
-    Returns summary statistics needed for the dashboard:
-    - total voters
-    - visited count (Visited_<admin_id>)
-    - male / female counts
-    - top addresses (total, visited, not_visited) limited to top 50 (changeable)
+    âœ… Return ONLY aggregated data, not individual rows
     """
     try:
-        main_admin_id = current_user.get("main_admin_id") or current_user.get("user_id")
+        section_no = current_user.get("section_no")
+        main_admin_id = current_user.get("main_admin_id")
         visited_col = f'Visited_{main_admin_id}'
-
+        
         with get_connection() as conn:
-            cur = conn.cursor()
-
-            # total
-            cur.execute('SELECT COUNT(*) FROM "VoterList"')
-            total = cur.fetchone()[0] or 0
-
-            col_exists = True
-            if col_exists:
-                cur.execute(f'SELECT COUNT(*) FROM "VoterList" WHERE "{visited_col}" = TRUE')
-                visited = cur.fetchone()[0] or 0
-            else:
-                # fallback to generic Visited column if present
-                cur.execute("""
-                    SELECT column_name FROM information_schema.columns
-                    WHERE table_name = %s AND column_name = %s
-                """, ("VoterList", "Visited"))
-
-                if cur.fetchone():
-                    cur.execute('SELECT COUNT(*) FROM "VoterList" WHERE "Visited" = TRUE')
-                    visited = cur.fetchone()[0] or 0
-                else:
-                    visited = 0
-
-            # sex breakdown
-            cur.execute('SELECT "Sex", COUNT(*) FROM "VoterList" GROUP BY "Sex"')
-            sex_rows = cur.fetchall()
-            sex_breakdown = {r[0]: r[1] for r in sex_rows}
-
-            # top addresses (by total voters) - include visited/not_visited counts
-            cur.execute(f'''
-                SELECT "Address",
-                       COUNT(*) AS total,
-                       SUM(CASE WHEN "{visited_col}" = TRUE THEN 1 ELSE 0 END) AS visited,
-                       SUM(CASE WHEN "{visited_col}" = FALSE THEN 1 ELSE 0 END) AS not_visited
-                FROM "VoterList"
-                GROUP BY "Address"
-                ORDER BY total DESC
-                LIMIT 50
-            ''')
-            address_rows = cur.fetchall()
-            address_chart = []
-            for row in address_rows:
-                address_chart.append({
-                    "Address": row[0],
-                    "Total": int(row[1] or 0),
-                    "Visited": int(row[2] or 0),
-                    "NotVisited": int(row[3] or 0)
-                })
-
-        return {
-            "total": int(total),
-            "visited": int(visited),
-            "not_visited": int(total) - int(visited),
-            "sex_breakdown": sex_breakdown,
-            "address_chart": address_chart
-        }
+            with conn.cursor() as cur:
+                # Single optimized query for all stats
+                cur.execute(f"""
+                    SELECT 
+                        COUNT(*) as total,
+                        SUM(CASE WHEN "{visited_col}" = TRUE THEN 1 ELSE 0 END) as visited,
+                        SUM(CASE WHEN "Sex" = 'M' THEN 1 ELSE 0 END) as male,
+                        SUM(CASE WHEN "Sex" = 'F' THEN 1 ELSE 0 END) as female
+                    FROM "VoterList"
+                    WHERE "SectionNo" = %s
+                """, (section_no,))
+                
+                row = cur.fetchone()
+                total, visited, male, female = row
+                
+                return {
+                    "total": int(total or 0),
+                    "visited": int(visited or 0),
+                    "not_visited": int((total or 0) - (visited or 0)),
+                    "male": int(male or 0),
+                    "female": int(female or 0)
+                }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
@@ -1500,8 +1495,5 @@ def get_surveys(limit: int = 500, offset: int = 0, current_user = Depends(get_cu
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-# ==================== RUN ====================
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+
 

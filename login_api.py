@@ -982,7 +982,9 @@ def get_voter_list(
                 "VoterList"."VAddress",
                 {visited_expr} AS "Visited",
                 "SurveyData"."Mobile" AS "Mobile",
-                "SurveyData"."HouseNo" AS "HouseNo"
+                "SurveyData"."HouseNo" AS "HouseNo",
+                "SurveyData"."Landmark" ,
+                "SurveyData"."Cast" 
             FROM "VoterList"
             LEFT JOIN "SurveyData"
                 ON "VoterList"."VoterID" = "SurveyData"."VoterID"

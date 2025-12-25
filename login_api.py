@@ -1376,7 +1376,7 @@ def submit_survey(
                 # ------------------ FAMILY HEAD ------------------
                 cur.execute("""
                     SELECT "EName", "VEName", "SectionNo", "Sex", "Age",
-                           "VAddress", "PartNo"
+                    "VAddress", "PartNo"
                     FROM "VoterList"
                     WHERE "VoterID" = %s
                 """, (request.family_head_id,))
@@ -1429,9 +1429,24 @@ def submit_survey(
                 cur.execute("""
                     INSERT INTO "SurveyData"
                     ("VoterID", "VEName", "HouseNo", "Landmark", "VAddress",
-                     "Mobile", "SectionNo", "VotersCount", "Male", "Female",
-                     "Caste", "Sex", "PartNo", "Age", "UserID")
+                    "Mobile", "SectionNo", "VotersCount", "Male", "Female",
+                    "Caste", "Sex", "PartNo", "Age", "UserID")
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT ("VoterID", "UserID")
+                    DO UPDATE SET
+                        "VEName" = EXCLUDED."VEName",
+                        "HouseNo" = EXCLUDED."HouseNo",
+                        "Landmark" = EXCLUDED."Landmark",
+                        "VAddress" = EXCLUDED."VAddress",
+                        "Mobile" = EXCLUDED."Mobile",
+                        "SectionNo" = EXCLUDED."SectionNo",
+                        "VotersCount" = EXCLUDED."VotersCount",
+                        "Male" = EXCLUDED."Male",
+                        "Female" = EXCLUDED."Female",
+                        "Caste" = EXCLUDED."Caste",
+                        "Sex" = EXCLUDED."Sex",
+                        "PartNo" = EXCLUDED."PartNo",
+                        "Age" = EXCLUDED."Age"
                     RETURNING "SurveyNo"
                 """, (
                     request.family_head_id,

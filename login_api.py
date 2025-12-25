@@ -984,7 +984,7 @@ def get_voter_list(
                 "SurveyData"."Mobile" AS "Mobile",
                 "SurveyData"."HouseNo" AS "HouseNo",
                 "SurveyData"."Landmark" ,
-                "SurveyData"."Cast" 
+                "SurveyData"."Caste" 
             FROM "VoterList"
             LEFT JOIN "SurveyData"
                 ON "VoterList"."VoterID" = "SurveyData"."VoterID"

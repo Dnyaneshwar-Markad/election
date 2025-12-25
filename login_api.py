@@ -614,7 +614,7 @@ def list_users(parent_id: Optional[int] = None, current_user = Depends(get_curre
         with get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
-                    SELECT "UserID", "Username", "Role", "CreatedAt"
+                    SELECT "UserID", "Username","Password", "Role", "CreatedAt"
                     FROM "User"
                     WHERE "ParentID" = %s
                     ORDER BY "CreatedAt" DESC

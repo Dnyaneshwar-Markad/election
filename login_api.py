@@ -713,6 +713,62 @@ def add_subuser(
         print("ADD SUBUSER ERROR:", e)
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.delete("/delete-subuser/{subuser_id}")
+def delete_subuser(
+    subuser_id: int,
+    current_user = Depends(get_current_user)
+):
+    # 1️⃣ Only admins can delete subusers
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Only admins can delete subusers")
+
+    admin_id = current_user["user_id"]
+
+    try:
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+
+                # 2️⃣ Verify the subuser exists AND belongs to this admin
+                cur.execute("""
+                    SELECT "UserID"
+                    FROM "User"
+                    WHERE "UserID" = %s AND "ParentID" = %s AND "Role" = 'subuser'
+                """, (subuser_id, admin_id))
+
+                sub = cur.fetchone()
+
+                if not sub:
+                    raise HTTPException(
+                        status_code=404,
+                        detail="Subuser not found or not assigned to this admin"
+                    )
+
+                # 3️⃣ Delete the subuser
+                cur.execute("""
+                    DELETE FROM "User"
+                    WHERE "UserID" = %s
+                """, (subuser_id,))
+
+                # 4️⃣ Decrement Users count for admin (avoid negative)
+                cur.execute("""
+                    UPDATE "User"
+                    SET "Users" = GREATEST(("Users" - 1), 0)
+                    WHERE "UserID" = %s
+                """, (admin_id,))
+
+                conn.commit()
+
+        return {
+            "success": True,
+            "message": "Subuser deleted successfully",
+            "deleted_user_id": subuser_id
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/admin/set-allocation")
 def set_user_allocation(

@@ -1445,7 +1445,7 @@ def get_voters_data_counts(
                 # --- Address list with counts ---
                 cur.execute(
                     '''
-                    SELECT "Address", COUNT(*) 
+                    SELECT "VAddress", COUNT(*) 
                     FROM "VoterList"
                     WHERE "SectionNo" = %s
                     GROUP BY "VAddress"

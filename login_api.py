@@ -1448,7 +1448,7 @@ def get_voters_data_counts(
                     SELECT "Address", COUNT(*) 
                     FROM "VoterList"
                     WHERE "SectionNo" = %s
-                    GROUP BY "Address"
+                    GROUP BY "VAddress"
                     ORDER BY COUNT(*) DESC
                     ''',
                     (section_no,)

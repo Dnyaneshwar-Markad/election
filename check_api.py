@@ -1,5 +1,5 @@
 import os, requests
-BASE = os.getenv('API_URL', 'https://election-are-near-backend.onrender.com/')
+BASE = os.getenv('API_URL', 'http://127.0.0.1:8000/')
 print('BASE_URL =', BASE)
 try:
     r = requests.get(BASE, timeout=10)

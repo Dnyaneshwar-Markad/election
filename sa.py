@@ -17,7 +17,6 @@ from reportlab.lib.colors import Color, black
 import time
 from datetime import datetime, timedelta
 from api_client import APIClient
-from data_loader import clear_all_data
 import io
 import textwrap
 import os
@@ -58,7 +57,7 @@ def init_session_state():
 @st.cache_resource
 def get_api_client_singleton():
     """Create a single API client instance"""
-    base = os.getenv("API_URL", "https://election-are-near-backend.onrender.com")
+    base = os.getenv("API_URL", "http://127.0.0.1:8000")
     return APIClient(base_url=base)
 
 def get_api_client():
@@ -143,7 +142,7 @@ def force_logout_due_to_inactivity():
 @st.cache_resource
 def get_api_client_singleton():
     """Create a single API client instance - CACHED"""
-    base = os.getenv("API_URL", "https://election-are-near-backend.onrender.com")
+    base = os.getenv("API_URL", "http://127.0.0.1:8000")
     return APIClient(base_url=base)
 
 def get_api_client():
@@ -275,10 +274,6 @@ def setup_auto_refresh():
     # Refresh every 10 seconds to check inactivity
     st.markdown("""
     <script>
-        // Auto-refresh every 10 seconds
-        setTimeout(function() {
-            window.location.reload();
-        }, 10000);
         
         // Track user activity
         let activityEvents = ['mousedown', 'keydown', 'scroll', 'touchstart', 'click'];
@@ -329,7 +324,7 @@ FONT_PATH = "NotoSansDevanagari.ttf"
 # (DB-based validate_user removed — use API login endpoint instead)
 def get_api_client():
     """Return an APIClient configured with base URL and session token from Streamlit state."""
-    base = os.getenv("API_URL", "https://election-are-near-backend.onrender.com")
+    base = os.getenv("API_URL", "http://127.0.0.1:8000")
     token = st.session_state.get("access_token") or st.session_state.get("token")
     return APIClient(base_url=base, token=token)
 

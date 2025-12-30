@@ -121,7 +121,7 @@
   "variable": [
     {
       "key": "base_url",
-      "value": "https://election-are-near-backend.onrender.com"
+      "value": "http://127.0.0.1:8000"
     },
     {
       "key": "token",

@@ -1415,6 +1415,7 @@ def get_voters_data(
     
 @app.get("/voters-data/counts")
 def get_voters_data_counts(
+    search: Optional[str] = None,  # Add this
     current_user = Depends(get_current_user)
 ):
     try:
@@ -1422,19 +1423,28 @@ def get_voters_data_counts(
         if not section_no:
             raise HTTPException(status_code=403, detail="Section not assigned")
 
+        where_clause = '"SectionNo" = %s'
+        params = [section_no]
+
         with get_connection() as conn:
             with conn.cursor() as cur:
 
                 # --- Surname list with counts ---
+                surname_where = where_clause
+                surname_params = params.copy()
+                if search:
+                    surname_where += ' AND "EName" ILIKE %s'
+                    surname_params.append(f"%{search}%")
+                
                 cur.execute(
-                    '''
+                    f'''
                     SELECT "Surname", COUNT(*) 
                     FROM "VoterList"
-                    WHERE "SectionNo" = %s
+                    WHERE {surname_where}
                     GROUP BY "Surname"
                     ORDER BY COUNT(*) DESC
                     ''',
-                    (section_no,)
+                    surname_params
                 )
                 surname_rows = cur.fetchall()
                 surnames = [
@@ -1443,15 +1453,21 @@ def get_voters_data_counts(
                 ]
 
                 # --- Address list with counts ---
+                address_where = where_clause
+                address_params = params.copy()
+                if search:
+                    address_where += ' AND "Address" ILIKE %s'
+                    address_params.append(f"%{search}%")
+                
                 cur.execute(
-                    '''
-                    SELECT "Address", COUNT(*) 
+                    f'''
+                    SELECT "VAddress", COUNT(*) 
                     FROM "VoterList"
-                    WHERE "SectionNo" = %s
-                    GROUP BY "Address"
+                    WHERE {address_where}
+                    GROUP BY "VAddress"
                     ORDER BY COUNT(*) DESC
                     ''',
-                    (section_no,)
+                    address_params
                 )
                 address_rows = cur.fetchall()
                 addresses = [
@@ -1459,16 +1475,16 @@ def get_voters_data_counts(
                     for r in address_rows
                 ]
 
-                # --- Part No list with counts ---
+                # Part numbers (no search needed typically)
                 cur.execute(
-                    '''
+                    f'''
                     SELECT "PartNo", COUNT(*) 
                     FROM "VoterList"
-                    WHERE "SectionNo" = %s
+                    WHERE {where_clause}
                     GROUP BY "PartNo"
                     ORDER BY "PartNo"
                     ''',
-                    (section_no,)
+                    params
                 )
                 part_rows = cur.fetchall()
                 parts = [
@@ -1480,8 +1496,6 @@ def get_voters_data_counts(
             "surnames": surnames,
             "addresses": addresses,
             "part_numbers": parts,
-
-            # totals
             "total_surnames": len(surnames),
             "total_addresses": len(addresses),
             "total_part_numbers": len(parts),

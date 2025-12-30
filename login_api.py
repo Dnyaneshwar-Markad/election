@@ -1412,6 +1412,84 @@ def get_voters_data(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/voters-data/counts")
+def get_voters_data_counts(
+    current_user = Depends(get_current_user)
+):
+    try:
+        section_no = current_user.get("section_no")
+        if not section_no:
+            raise HTTPException(status_code=403, detail="Section not assigned")
+
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+
+                # --- Surname list with counts ---
+                cur.execute(
+                    '''
+                    SELECT "Surname", COUNT(*) 
+                    FROM "VoterList"
+                    WHERE "SectionNo" = %s
+                    GROUP BY "Surname"
+                    ORDER BY COUNT(*) DESC
+                    ''',
+                    (section_no,)
+                )
+                surname_rows = cur.fetchall()
+                surnames = [
+                    {"surname": r[0], "count": r[1]}
+                    for r in surname_rows
+                ]
+
+                # --- Address list with counts ---
+                cur.execute(
+                    '''
+                    SELECT "Address", COUNT(*) 
+                    FROM "VoterList"
+                    WHERE "SectionNo" = %s
+                    GROUP BY "Address"
+                    ORDER BY COUNT(*) DESC
+                    ''',
+                    (section_no,)
+                )
+                address_rows = cur.fetchall()
+                addresses = [
+                    {"address": r[0], "count": r[1]}
+                    for r in address_rows
+                ]
+
+                # --- Part No list with counts ---
+                cur.execute(
+                    '''
+                    SELECT "PartNo", COUNT(*) 
+                    FROM "VoterList"
+                    WHERE "SectionNo" = %s
+                    GROUP BY "PartNo"
+                    ORDER BY "PartNo"
+                    ''',
+                    (section_no,)
+                )
+                part_rows = cur.fetchall()
+                parts = [
+                    {"part_no": r[0], "count": r[1]}
+                    for r in part_rows
+                ]
+
+        return {
+            "surnames": surnames,
+            "addresses": addresses,
+            "part_numbers": parts,
+
+            # totals
+            "total_surnames": len(surnames),
+            "total_addresses": len(addresses),
+            "total_part_numbers": len(parts),
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 # # -------------------- SUBMIT SURVEY (kept logic but hardened) --------------------
 @app.post("/submit-survey", response_model=SurveySubmissionResponse)
@@ -1594,5 +1672,4 @@ def get_surveys(limit: int = 500, offset: int = 0, current_user = Depends(get_cu
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-
 

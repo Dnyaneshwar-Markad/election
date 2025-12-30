@@ -16,7 +16,7 @@ SECRET_KEY = "your-secret-key-change-this-12345"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 10080  # 7 days
 SESSION_TIMEOUT_HOURS = 48
-INACTIVITY_TIMEOUT_MINUTES = 400
+INACTIVITY_TIMEOUT_MINUTES = 15
 
 # Database connection string (your NeonDB)
 DATABASE_URL = "postgresql://neondb_owner:npg_rs1bVogh7EtU@ep-weathered-math-a1pj9ocn-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require"

@@ -16,7 +16,7 @@ SECRET_KEY = "your-secret-key-change-this-12345"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 10080  # 7 days
 SESSION_TIMEOUT_HOURS = 48
-INACTIVITY_TIMEOUT_MINUTES = 15
+INACTIVITY_TIMEOUT_MINUTES = 60
 
 # Database connection string (your NeonDB)
 DATABASE_URL = "postgresql://neondb_owner:npg_rs1bVogh7EtU@ep-weathered-math-a1pj9ocn-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require"
@@ -1291,16 +1291,16 @@ def get_voters_data(
 
         # ------------------ FILTERS ------------------
         if surname:
-            where_clauses.append('"Surname" ILIKE %s')
-            params.append(f"%{surname}%")
+            where_clauses.append('("Surname" ILIKE %s OR "ESurname" ILIKE %s)')
+            params.extend([f"{surname}", f"{surname}"])
 
         if part_no:
             where_clauses.append('"PartNo" = %s')
             params.append(part_no)
 
         if address:
-            where_clauses.append('"Address" ILIKE %s')
-            params.append(f"%{address}%")
+            where_clauses.append('("Address" ILIKE %s OR "VAddress" ILIKE %s)')
+            params.extend([f"%{address}%", f"%{address}%"])
 
         if search:
             where_clauses.append('("EName" ILIKE %s OR "VEName" ILIKE %s)')
@@ -1326,7 +1326,7 @@ def get_voters_data(
                 "column": "Address",
                 "order": '"Address" ASC, "VEName" ASC'
             },
-            "ward_no": {  # ✅ Ward = SectionNo
+            "ward_no": {  # Ward = SectionNo
                 "column": "SectionNo",
                 "order": '"SectionNo" ASC, "VEName" ASC'
             },
@@ -1365,7 +1365,6 @@ def get_voters_data(
 
                     grouped = {}
                     for r in raw:
-                        # -------- Ward Display Formatting --------
                         if view_type.lower() == "ward_no":
                             key = f"Ward {r['grp_value']}"
                         else:
@@ -1412,7 +1411,8 @@ def get_voters_data(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    
+
+
 @app.get("/voters-data/counts")
 def get_voters_data_counts(
     search: Optional[str] = None,  # Add this
@@ -1433,8 +1433,8 @@ def get_voters_data_counts(
                 surname_where = where_clause
                 surname_params = params.copy()
                 if search:
-                    surname_where += ' AND "EName" ILIKE %s'
-                    surname_params.append(f"%{search}%")
+                    surname_where += ' AND ("ESurname" ILIKE %s OR "Surname" ILIKE %s)'
+                    surname_params.extend([f"%{search}%", f"%{search}%"])
                 
                 cur.execute(
                     f'''
@@ -1456,9 +1456,9 @@ def get_voters_data_counts(
                 address_where = where_clause
                 address_params = params.copy()
                 if search:
-                    address_where += ' AND "Address" ILIKE %s'
-                    address_params.append(f"%{search}%")
-                
+                    address_where += ' AND ("Address" ILIKE %s OR "VAddress" ILIKE %s)'
+                    address_params.extend([f"%{search}%", f"%{search}%"])
+
                 cur.execute(
                     f'''
                     SELECT "VAddress", COUNT(*) 

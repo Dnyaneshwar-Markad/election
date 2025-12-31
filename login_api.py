@@ -1482,7 +1482,7 @@ def get_voters_data_counts(
                     FROM "VoterList"
                     WHERE {where_clause}
                     GROUP BY "PartNo"
-                    ORDER BY "PartNo"
+                    ORDER BY COUNT(*) DESC
                     ''',
                     params
                 )
